@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '5 22 * * *'
   workflow_dispatch:
+    inputs:
+      comprobar_fuente:
+        description: Comprobar Errepar sin acceder a Google Drive
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -26,10 +31,14 @@ jobs:
       - name: Pruebas sin Internet
         run: python -m unittest -v test_cloud test_bna.Rules.test_exact_previous_order_duplicates_and_ignore_extra test_bna.Rules.test_unavailable_invalid_blank_future_and_today test_bna.Rules.test_parse test_bna.Rules.test_source_validation
       - name: Consultar Errepar y actualizar Drive
+        if: ${{ !inputs.comprobar_fuente }}
         env:
           GOOGLE_DRIVE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID }}
         run: python actualizar_drive.py
+      - name: Comprobar consulta real a Errepar
+        if: ${{ inputs.comprobar_fuente }}
+        run: python actualizar_oficial.py
       - name: Guardar evidencia y respaldo
         if: always()
         uses: actions/upload-artifact@v4
