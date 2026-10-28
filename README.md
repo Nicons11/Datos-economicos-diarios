@@ -1,6 +1,6 @@
 # Datos económicos diarios en el mismo Excel de Drive
 
-El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**. GitHub puede demorar el inicio. Conserva el ID y nombre `Tipo_de_Cambio_BNA.xlsx` de Drive mediante el puente Apps Script ya configurado; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola.
+El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**, con consultas de respaldo a las **19:35 y 20:05**. GitHub puede demorar u omitir ejecuciones programadas; estos horarios no garantizan puntualidad. Las consultas se serializan para evitar ejecuciones simultáneas y revisan las correcciones publicadas por las fuentes. Conserva el ID y nombre `Tipo_de_Cambio_BNA.xlsx` de Drive mediante el puente Apps Script ya configurado; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola.
 
 ## Fuentes y hojas
 

@@ -1,7 +1,9 @@
 name: Actualizar Excel en Google Drive
 on:
   schedule:
-    - cron: '5 22 * * *'
+    # Argentina UTC-3: 19:05, respaldo 19:35 y respaldo 20:05.
+    - cron: '5,35 22 * * *'
+    - cron: '5 23 * * *'
   workflow_dispatch:
     inputs:
       comprobar_fuente:
