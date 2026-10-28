@@ -10,7 +10,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from actualizar_oficial import BOOK
-from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, INDICES, cronista, index_data, index_url, rofex, sofr
+from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, BYMA_QUOTE, INDICES, cronista, index_data, index_url, rofex, sofr
 
 ROOT = Path(__file__).resolve().parent
 REPORT = ROOT / 'evidencia' / 'resultado.json'
@@ -22,6 +22,7 @@ SCHEMAS = {
 }
 URLS = {'Cotizaciones': CRONISTA, 'ROFEX': ROFEX, 'SOFR': SOFR,
         **{name: index_url(name) for name in INDICES}}
+URLS['Merval'] += ' | Cotización: ' + BYMA_QUOTE
 
 def as_date(value):
     return value.date() if isinstance(value, datetime) else value
@@ -45,6 +46,25 @@ def existing_rows(wb, name):
     keys = [(r[0], r[1]) if name == 'ROFEX' else r[0] for r in rows]
     if len(set(keys)) != len(keys): raise ValueError(f'Historial duplicado en {name}')
     return rows
+
+def valid_dates(name, rows):
+    column = 3 if name == 'ROFEX' else 1
+    return [r[3] if name == 'Cotizaciones' else r[0] for r in rows if r[column] is not None]
+
+def coverage(wb, now):
+    result = {}; today = now.date()
+    for name in SCHEMAS:
+        rows = existing_rows(wb,name); dates = valid_dates(name,rows)
+        latest = max(dates) if dates else None
+        count = sum(d == today for d in dates)
+        expected = 13 if name == 'ROFEX' else 1
+        if name == 'SOFR': state = 'FECHA EFECTIVA PUBLICADA; NO EXIGIR FECHA DE CONSULTA'
+        elif count >= expected: state = 'DATOS DE LA FECHA DE CONSULTA PRESENTES'
+        else: state = 'PENDIENTE: faltan datos de la fecha de consulta'
+        result[name] = {'ultima_fecha_dato':latest.isoformat() if latest else None,
+                        'fecha_consulta':today.isoformat(),'datos_fecha_consulta':count,
+                        'estado':state}
+    return result
 
 def collect(book, evidence, now):
     wb = load_workbook(book, read_only=True, data_only=True)
@@ -76,14 +96,14 @@ def format_sheet(ws, name, rows, now):
     notes = {'Cotizaciones': 'Compra y venta BNA. Días sin fila: último dato disponible, identificado por Fecha efectiva y Estado.',
              'ROFEX': 'Precio de ajuste oficial, incluso sin volumen. Mes actual y 12 siguientes por rueda; faltantes quedan vacíos.',
              'SOFR': 'Tasa anual overnight. Fecha efectiva del dato; no es la fecha de publicación ni Term SOFR.',
-             'Merval': 'MSCI Merval según BYMA desde 19/10/2026. Sin empalmar S&P. Ceros de la fuente: sin dato publicado.'}
-    ws['A4'] = notes.get(name, 'Índice al cierre de cada fecha publicada. La fila del día queda provisional hasta la próxima consulta.')
-    latest = max(r[3] for r in rows) if name == 'Cotizaciones' else max(r[0] for r in rows)
-    ws['A5'] = 'Última fecha disponible: ' + latest.strftime('%d/%m/%Y')
+             'Merval': 'MSCI Merval desde 19/10/2026: histórico y cierre informado por BYMA. Sin empalmar S&P; ceros: sin publicación.'}
+    ws['A4'] = notes.get(name, 'Valores publicados por la fuente. Si falta el histórico diario, se identifica la cotización de referencia en Estado.')
+    dates = valid_dates(name,rows); latest = max(dates) if dates else None
+    ws['A5'] = 'Última fecha con valor: ' + (latest.strftime('%d/%m/%Y') if latest else 'sin valores publicados')
     for r in range(1,6):
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(headers))
         ws.cell(r,1).alignment = Alignment(wrap_text=True, vertical='center')
-        ws.row_dimensions[r].height = 30 if r in (2,4) else 23
+        ws.row_dimensions[r].height = 45 if name == 'Merval' and r == 2 else 30 if r in (2,4) else 23
     ws['A1'].font = Font(name='Arial', size=16, bold=True, color='172B3A')
     for c, header in enumerate(headers, 1):
         cell = ws.cell(6,c,header); cell.font = Font(name='Arial',bold=True,color='FFFFFF')
@@ -138,13 +158,23 @@ def apply_results(book, results, errors, now):
         if name in wb.sheetnames: del wb[name]
         ws = wb.create_sheet(name, position)
         format_sheet(ws, name, rows, now)
+    dates_report = coverage(wb,now)
     # Preferencia del usuario: Fuente tiene exactamente cinco renglones de metadatos.
     if 'Fuente' in wb.sheetnames: del wb['Fuente']
     src = wb.create_sheet('Fuente')
     src.append(['Fuentes · ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' Argentina', 'Estado de la última consulta'])
     for group, names in [('BNA · El Cronista',['Cotizaciones']), ('Índices · Yahoo / BYMA',list(INDICES)),
                          ('ROFEX · A3',['ROFEX']), ('SOFR · New York Fed',['SOFR'])]:
-        status = '; '.join(name + ': ' + (errors[name].splitlines()[0][:180] if name in errors else 'actualizado' if name in results else 'sin consultar') for name in names)
+        parts = []
+        for name in names:
+            item = dates_report[name]; last = item['ultima_fecha_dato'] or 'sin dato'
+            if name in errors: state = errors[name].splitlines()[0][:180]
+            elif name not in results: state = 'sin consultar'
+            elif name == 'SOFR': state = 'última fecha efectiva ' + last
+            elif item['estado'].startswith('PENDIENTE'): state = 'pendiente ' + now.date().isoformat() + '; último valor ' + last
+            else: state = 'datos de ' + last
+            parts.append(name + ': ' + state)
+        status = '; '.join(parts)
         src.append([group,status])
     src.column_dimensions['A'].width = 35; src.column_dimensions['B'].width = 115
     for row in src:
@@ -169,7 +199,9 @@ def apply_results(book, results, errors, now):
         shutil.copy2(book, backup); tmp.replace(book)
     finally:
         tmp.unlink(missing_ok=True)
-    return {'actualizadas': list(results), 'errores': errors, 'respaldo': str(backup), 'consulta': now.isoformat()}
+    pending = [name for name,item in dates_report.items() if item['estado'].startswith('PENDIENTE')]
+    return {'actualizadas': list(results), 'errores': errors, 'cobertura':dates_report,
+            'pendientes_fecha_consulta':pending,'respaldo': str(backup), 'consulta': now.isoformat()}
 
 def main():
     p = argparse.ArgumentParser(description=__doc__); p.add_argument('--book', type=Path, default=BOOK)
@@ -185,7 +217,9 @@ def main():
 def check_result():
     # Llamar DESPUÉS de subir las fuentes correctas: Actions avisa la actualización parcial.
     if REPORT.exists():
-        errors = json.loads(REPORT.read_text()).get('errores')
+        report = json.loads(REPORT.read_text()); errors = report.get('errores')
         if errors: raise RuntimeError('Actualización parcial; se conservaron hojas fallidas: ' + '; '.join(errors))
+        if report.get('pendientes_fecha_consulta'):
+            print('CONSULTA GUARDADA; DATOS DE LA FECHA DE CONSULTA PENDIENTES: ' + '; '.join(report['pendientes_fecha_consulta']))
 
 if __name__ == '__main__': main()

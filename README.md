@@ -34,3 +34,9 @@ python actualizar_economicos.py --book copia-de-prueba.xlsx
 El archivo de prueba debe existir. Los scripts de Drive descargan primero el libro vigente y usan el mismo actualizador. La opción manual **comprobar_fuente** del workflow consulta en el runner sin acceder a Drive. El workflow **Probar nuevas fuentes económicas** prueba una copia aislada sin secretos ni escritura en Drive.
 
 La configuración Apps Script existente usa los secretos `APPS_SCRIPT_URL` y `APPS_SCRIPT_KEY`; no se imprimen ni se guardan en el repositorio. Para reinstalar el puente, ver `google-apps-script/INSTRUCCIONES.md`. La alternativa OAuth anterior permanece disponible, pero no es necesaria para la configuración actual. Los scripts `actualizar_oficial.py` y `actualizar_bna.py` quedan como compatibilidad histórica y pruebas: el workflow diario invoca `actualizar_economicos.py` a través del puente.
+
+## Fecha de consulta y fecha del dato
+
+Una consulta exitosa no garantiza un valor de la misma fecha. El reporte y Fuente muestran por serie la última fecha con valor y los datos pendientes de la fecha consultada; SOFR conserva su fecha efectiva de publicación, sin exigir la del día de consulta.
+
+Si Yahoo todavía no completa la vela histórica del día, se admite su regularMarketPrice únicamente con regularMarketTime de esa misma fecha en la zona horaria del mercado. Se identifica como cotización de referencia e histórico pendiente; nunca se traslada una cotización anterior a hoy. Para MSCI Merval, cuando el histórico oficial está retrasado se consulta también index-price de BYMA, seleccionando MMSCI y su closingPrice fechado, no trade ni previousClosingPrice.
