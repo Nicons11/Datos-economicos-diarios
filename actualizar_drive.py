@@ -43,7 +43,7 @@ def main():
             _, done = download.next_chunk()
         BOOK.write_bytes(stream.getvalue())
     # Si falla la consulta o la validación, no se envía nada a Drive.
-    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_oficial.py')], check=True)
+    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_economicos.py')], check=True)
     media = MediaFileUpload(str(BOOK), mimetype=MIME, resumable=True)
     if existing:
         current = service.files().get(fileId=existing['id'], fields='version').execute()
@@ -53,6 +53,9 @@ def main():
     else:
         service.files().create(body={'name': BOOK.name, 'parents': [folder_id]}, media_body=media).execute()
     print('Excel actualizado en Google Drive.')
+    from actualizar_economicos import check_result
+    check_result()
 
 if __name__ == '__main__':
     main()
+

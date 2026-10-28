@@ -35,12 +35,15 @@ def main():
     previous = exchange(url, key, 'read')
     if previous.get('content') is not None:
         BOOK.write_bytes(base64.b64decode(previous['content'], validate=True))
-    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_oficial.py')], check=True)
+    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_economicos.py')], check=True)
     result = exchange(url, key, 'write', version=previous.get('version'),
                       content=base64.b64encode(BOOK.read_bytes()).decode('ascii'))
     if not result.get('fileId'):
         raise RuntimeError('Google no confirmó el ID del archivo guardado')
     print('Excel actualizado en la carpeta de Google Drive.')
+    from actualizar_economicos import check_result
+    check_result()
 
 if __name__ == '__main__':
     main()
+

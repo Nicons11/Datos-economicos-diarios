@@ -1,39 +1,32 @@
-# Excel BNA diario en Google Drive
+# Datos económicos diarios en el mismo Excel de Drive
 
-GitHub Actions ejecuta `actualizar_drive.py` todos los días a las **19:05 de Argentina** (22:05 UTC), aunque tu Mac esté apagada. GitHub puede demorar el inicio: no es un horario garantizado. El workflow ya está publicado y activo; falta configurar la autorización y la carpeta de Drive para completar las actualizaciones remotas. Guardar el entorno de Codex no sustituye esa autorización.
+El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**. GitHub puede demorar el inicio. Conserva el ID y nombre `Tipo_de_Cambio_BNA.xlsx` de Drive mediante el puente Apps Script ya configurado; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola.
 
-La ejecución [40618043814](https://github.com/Nicons11/Datos-economicos-diarios/actions/runs/40618043814) pasó las ocho pruebas y la consulta real a Errepar con actualización del libro local del runner. No accedió a Drive. Para repetir esa comprobación, usá Run workflow y activá `comprobar_fuente`; para el flujo completo dejá esa opción desactivada.
+## Fuentes y hojas
 
-## Qué hace
+- **Cotizaciones**: compra y venta de Dólar BNA de [El Cronista](https://www.cronista.com/MercadosOnline/dolar.html/). Se identifica exactamente `ARS=BNAR`; no se usa blue, mayorista ni MEP. El histórico anterior de cuatro series se conserva íntegro en **Histórico Errepar** al migrar. Desde entonces no se consulta Errepar. Las fechas son las publicadas por la fuente: no se generan cotizaciones artificiales para fines de semana. El panel actual queda como observado y sin certificación de cierre; el histórico lo reemplaza en consultas posteriores.
+- **Bovespa, SP500, Merval, SSEC**: históricos diarios de Investing, con cierre, apertura, máximo, mínimo y variación. Las filas de la fecha actual son provisionales y se revisan en la siguiente consulta. Merval usa la página **MSCI Merval**; la antigua página S&P Merval dejó de actualizarse en octubre de 2026. No se empalman ambas bases. SSEC es Shanghai Composite.
+- **ROFEX**: futuros simples DLR de [A3 CEM](https://cem.matbarofex.com.ar/), campo `settlement` (ajuste oficial), incluyendo contratos sin volumen. Cada rueda conserva el mes actual y los doce siguientes: octubre de 2026 hasta octubre de 2027 inclusive son 13 posiciones. Se guarda fecha de rueda, contrato, mes y ajuste en ARS/USD. Un mes no publicado queda vacío con estado explícito. No se interpola ni se sustituye por el último negociado.
+- **SOFR**: tasa overnight anual de la [Reserva Federal de Nueva York](https://www.newyorkfed.org/markets/reference-rates/sofr/), obtenida de su API oficial. Se guarda fecha efectiva y revisiones. No es Term SOFR ni los promedios a 30/90/180 días. Se almacena como porcentaje Excel real.
+- **Fuente**: cinco renglones de metadatos y estado de la última consulta, según la preferencia del usuario.
 
-Busca `Tipo_de_Cambio_BNA.xlsx` en la carpeta elegida. Si existe, descarga esa versión, consulta Errepar y actualiza el mismo archivo de Drive conservando su enlace. Si no existe, usa el Excel inicial adjunto y lo crea después de una consulta exitosa. No convierte el libro a Google Sheets.
+La primera consulta toma aproximadamente un mes de historia disponible. Después combina por fecha (y contrato en ROFEX), revisa un solapamiento reciente y conserva el historial. No es una descarga de historia completa. Si BNA o un índice no solapa con el historial del libro después de una inactividad prolongada, conserva esa hoja e informa el hueco para recuperarlo expresamente.
 
-Conserva las cuatro series, historial, fechas efectivas y marcas de datos provisionales. Si falla la extracción no sube un archivo nuevo. Guarda evidencia y respaldo previo durante 30 días en los artefactos de GitHub Actions. Evitá editar el libro mientras corre: se comprueba su versión antes de subir, pero esa comprobación no es un bloqueo de edición en Drive. Una copia descargada a tu Mac no se sincroniza sola; abrí el archivo de Drive o usá Drive para escritorio.
+## Errores y conservación
 
-## Activar una vez
+Las fuentes se validan por separado. Una fuente fallida conserva su hoja anterior; las correctas se actualizan. La hoja Fuente informa los errores y Actions termina con error **después** de guardar la actualización parcial, para que el fallo no pase inadvertido. Si ninguna fuente valida, no se modifica ni se sube el libro. Un bloqueo de Excel cancela la actualización. Hay respaldo antes del reemplazo atómico y control de versión antes de publicar en Drive. Evitá editar el archivo mientras corre.
 
-**Opción elegida actualmente: Apps Script, sin cliente OAuth en Google Cloud.** Seguí [estas instrucciones](google-apps-script/INSTRUCCIONES.md). Usa los secretos `APPS_SCRIPT_URL` y `APPS_SCRIPT_KEY`. El usuario ya abrió un proyecto nuevo; falta pegar el código, autorizarlo e implementarlo. La alternativa OAuth que sigue es opcional y no hace falta completarla si usás Apps Script.
+Se conservan HTML/JSON, fecha de captura y URL de cada consulta en `evidencia/`, y respaldos en `respaldos/`, disponibles como artefactos de Actions durante 30 días. Investing puede bloquear accesos automáticos: se intenta una navegación normal con Chromium, sin resolver desafíos ni eludir bloqueos. Si persiste, se informa y se conserva la última hoja correcta.
 
-1. El contenido ya está publicado en la rama `main` de `Nicons11/Datos-economicos-diarios` y Actions está activo. Nunca subas tokens o credenciales al repositorio.
-2. La carpeta de Drive proporcionada por el usuario ya está configurada como destino predeterminado en el workflow. Podés dejarla vacía o subir el Excel inicial sin convertirlo ni cambiar el nombre. No debe haber dos archivos con ese nombre. Para cambiarla, configurá `GOOGLE_DRIVE_FOLDER_ID` con el ID de otra carpeta (`.../folders/ID`). El ID identifica la ubicación y no concede acceso.
-3. En Google Cloud, habilitá **Google Drive API**. Configurá el consentimiento OAuth y creá un cliente OAuth de tipo **Aplicación de escritorio**. Descargá su JSON fuera del repositorio. La autorización solicita acceso a Drive para buscar, leer y actualizar el archivo; usá una cuenta dedicada si preferís limitar el alcance a esa cuenta. Si tu organización restringe OAuth, necesitarás su autorización.
-4. En tu computadora, con Python 3.10 o posterior, instalá `python3 -m pip install -r requirements-cloud.txt`. Ejecutá una única vez `python3 autorizar_drive.py /ruta/cliente.json /ruta/privada/token-drive.json`. Se abre Google para autorizar. Elegí una ruta de salida fuera del repositorio. No compartas ese archivo ni lo pegues en el chat.
-5. En GitHub → Settings → Secrets and variables → Actions, creá el **secret** `GOOGLE_DRIVE_CREDENTIALS_JSON` con el contenido del archivo privado generado. La variable `GOOGLE_DRIVE_FOLDER_ID` es opcional: solo se necesita para reemplazar la carpeta ya configurada. Nunca guardes el token como variable pública.
-6. En Actions → **Actualizar Excel en Google Drive** → **Run workflow**, hacé la primera ejecución. Confirmá que finalice correctamente y que aparezca el Excel en Drive. A partir de entonces el cron diario queda activo. Si el repositorio es público, GitHub puede deshabilitar cron tras 60 días sin actividad; revisá el estado periódicamente.
-
-Importante: los refresh tokens de una app OAuth externa en estado **Testing** suelen vencer a los siete días con el alcance Drive. Configurá una modalidad de producción o interna compatible con tu cuenta y los requisitos de Google antes de depender de la tarea diaria. Si se revoca o vence la autorización, regenerá el secreto. Los errores aparecen en Actions; configurá las notificaciones de GitHub para recibir fallos.
-
-## Desarrollo y comprobaciones
+## Uso y pruebas
 
 ```sh
-python3 -m venv /workspace/bna-venv
-/workspace/bna-venv/bin/python -m pip install -r requirements-cloud.txt
-/workspace/bna-venv/bin/python -m playwright install chromium
-/workspace/bna-venv/bin/python -m unittest -v test_cloud test_bna.Rules.test_exact_previous_order_duplicates_and_ignore_extra test_bna.Rules.test_unavailable_invalid_blank_future_and_today test_bna.Rules.test_parse test_bna.Rules.test_source_validation
+python -m pip install -r requirements-cloud.txt
+python -m playwright install --with-deps chromium
+python -m unittest -v test_economicos test_apps_script test_cloud
+python actualizar_economicos.py --book copia-de-prueba.xlsx
 ```
 
-`python actualizar_oficial.py` consulta y actualiza solo el libro local. `python actualizar_drive.py` realiza el flujo completo y requiere las dos variables indicadas. Playwright necesita Chromium y sus bibliotecas de sistema; el workflow instala ambos con `--with-deps`.
+El archivo de prueba debe existir. Los scripts de Drive descargan primero el libro vigente y usan el mismo actualizador. La opción manual **comprobar_fuente** del workflow consulta en el runner sin acceder a Drive. El workflow **Probar nuevas fuentes económicas** prueba una copia aislada sin secretos ni escritura en Drive.
 
-Las pruebas originales `test_oficial.py` y un caso de `test_bna.py` requieren archivos históricos no adjuntos (`evidencia/inicio_oficial/fuente.json`, `evidencia/fuente_verificada.json` y `BNA_independiente.xlsx`). No se fabrican esas evidencias. Las nuevas pruebas usan datos sintéticos en copias temporales y verifican guardado, respaldo, historial, rechazo de capturas viejas y ausencia de publicación al fallar. No sustituyen una primera ejecución real contra Errepar y Drive.
-
-Servicios necesarios: Errepar, Google Drive y OAuth de Google; las instalaciones también requieren PyPI y los servidores de Chromium de Playwright. No se consulta VPN ni un archivo empresarial. Esta automatización es independiente de cualquier tarea local anterior: desactivá la antigua cuando la ejecución en Drive esté validada.
+La configuración Apps Script existente usa los secretos `APPS_SCRIPT_URL` y `APPS_SCRIPT_KEY`; no se imprimen ni se guardan en el repositorio. Para reinstalar el puente, ver `google-apps-script/INSTRUCCIONES.md`. La alternativa OAuth anterior permanece disponible, pero no es necesaria para la configuración actual. Los scripts `actualizar_oficial.py` y `actualizar_bna.py` quedan como compatibilidad histórica y pruebas: el workflow diario invoca `actualizar_economicos.py` a través del puente.
