@@ -18,6 +18,7 @@ INDICES = {
 }
 YAHOO = {'Bovespa': '^BVSP', 'SP500': '^GSPC', 'SSEC': '000001.SS'}
 BYMA = 'https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/chart/index-historical-series/history'
+BYMA_QUOTE = 'https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/index-price'
 
 def index_url(name):
     from urllib.parse import quote
@@ -43,8 +44,25 @@ def parse_yahoo(payload, symbol, today):
         close = number(close); valid.append(d)
         status = 'PROVISIONAL; VERIFICAR EN PRÓXIMA RUEDA' if d == today else 'CIERRE PUBLICADO'
         result[d] = [d,close,None,None,None,None,status]
+    # Yahoo puede publicar la cotización fechada del día antes de completar
+    # su vela histórica. Usar solo esa fecha real, sin trasladar la del día anterior.
+    stamp = meta.get('regularMarketTime')
+    if isinstance(stamp,(int,float)) and not isinstance(stamp,bool):
+        quoted = datetime.fromtimestamp(stamp,timezone.utc).astimezone(zone).date()
+        if quoted == today and (quoted not in result or result[quoted][1] is None) and meta.get('regularMarketPrice') is not None:
+            value = number(meta['regularMarketPrice'])
+            result[quoted] = [quoted,value,None,None,None,None,'COTIZACIÓN YAHOO; HISTÓRICO DIARIO PENDIENTE']
+            valid.append(quoted)
     if not valid or (today-max(valid)).days > 7: raise ValueError('Yahoo sin cierres recientes')
     return [result[d] for d in sorted(result)]
+
+def parse_byma_quote(payload, today):
+    matches = [r for r in payload.get('data',[]) if r.get('symbol') == 'MMSCI'
+               and r.get('description','').strip().upper() == 'MSCI MERVAL']
+    if len(matches) != 1: raise ValueError('BYMA no identificó una cotización única de MSCI Merval')
+    row = matches[0]; d = dated(row['date'],today)
+    if d != today or row.get('closingPrice') in (None,0): return []
+    return [[d,number(row['closingPrice']),None,None,None,None,'CIERRE INFORMADO POR BYMA (COTIZACIÓN)']]
 
 def parse_byma(payload, today):
     if payload.get('s') != 'ok': raise ValueError('BYMA sin serie histórica')
@@ -67,10 +85,16 @@ def parse_byma(payload, today):
 
 def index_data(name, evidence, today, start):
     if name == 'Merval':
-        return parse_byma(get(BYMA,evidence,'Merval.json',{
+        rows = parse_byma(get(BYMA,evidence,'Merval.json',{
             'symbol':'M','resolution':'D',
             'from':int(datetime.combine(start,datetime.min.time(),TZ).timestamp()),
             'to':int(datetime.combine(today+timedelta(days=1),datetime.min.time(),TZ).timestamp())}).json(),today)
+        if not any(r[0] == today and r[1] is not None for r in rows):
+            current = parse_byma_quote(get(BYMA_QUOTE,evidence,'Merval_cotizacion.json',body={}).json(),today)
+            merged = {r[0]:r for r in rows}
+            merged.update({r[0]:r for r in current})
+            rows = [merged[d] for d in sorted(merged)]
+        return rows
     return parse_yahoo(get(index_url(name),evidence,name+'.json',{
         'period1':int(datetime.combine(start,datetime.min.time(),timezone.utc).timestamp()),
         'period2':int(datetime.combine(today+timedelta(days=1),datetime.min.time(),timezone.utc).timestamp()),
@@ -90,13 +114,16 @@ def dated(value, today):
         raise ValueError('Fecha de observación futura')
     return d
 
-def get(url, evidence, name, params=None):
-    response = requests.get(url, params=params, timeout=(15, 90),
+def get(url, evidence, name, params=None, body=None):
+    request = requests.get if body is None else requests.post
+    extra = {} if body is None else {'json':body}
+    response = request(url, params=params, timeout=(15, 90), **extra,
                             headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en-US,en;q=0.9'})
     response.raise_for_status()
     (evidence / name).write_bytes(response.content)
     (evidence / (name + '.meta.json')).write_text(json.dumps({
-        'url': response.url, 'captured_at': datetime.now(TZ).isoformat()}, ensure_ascii=False))
+        'url': response.url, 'method':'GET' if body is None else 'POST',
+        'captured_at': datetime.now(TZ).isoformat()}, ensure_ascii=False))
     return response
 
 def parse_cronista(html, today):

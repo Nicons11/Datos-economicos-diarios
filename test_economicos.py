@@ -7,13 +7,37 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 from openpyxl import load_workbook
-from fuentes_economicas import TZ, parse_sofr, parse_rofex, parse_yahoo, parse_byma, parse_cronista, month_offset
+from fuentes_economicas import TZ, parse_sofr, parse_rofex, parse_yahoo, parse_byma, parse_byma_quote, parse_cronista, month_offset
 from actualizar_economicos import apply_results, existing_rows, ROOT, BOOK
 
 TODAY = date(2026,10,28)
 NOW = datetime(2026,10,28,19,5,tzinfo=TZ)
 
 class Sources(unittest.TestCase):
+    def test_yahoo_current_quote_fills_only_missing_same_market_date(self):
+        market_stamp = int(datetime(2026,10,28,4,0,tzinfo=TZ).timestamp())
+        p = {'chart':{'error':None,'result':[{'meta':{'symbol':'000001.SS','instrumentType':'INDEX',
+              'exchangeTimezoneName':'Asia/Shanghai','regularMarketTime':market_stamp,
+              'regularMarketPrice':3681.469},'timestamp':[market_stamp],
+              'indicators':{'quote':[{'close':[None]}]}}]}}
+        rows = parse_yahoo(p,'000001.SS',TODAY)
+        self.assertEqual(rows[0][0],TODAY); self.assertAlmostEqual(rows[0][1],3681.469)
+        self.assertIn('HISTÓRICO DIARIO PENDIENTE',rows[0][-1])
+        p['chart']['result'][0]['indicators']['quote'][0]['close']=[3682]
+        self.assertEqual(parse_yahoo(p,'000001.SS',TODAY)[0][1],3682)
+        p['chart']['result'][0]['indicators']['quote'][0]['close']=[None]
+        p['chart']['result'][0]['meta']['regularMarketTime']-=86400
+        with self.assertRaises(ValueError): parse_yahoo(p,'000001.SS',TODAY)
+
+    def test_byma_current_close_is_not_trade_or_previous_close(self):
+        row = {'symbol':'MMSCI','description':'MSCI MERVAL','date':'2026-10-28',
+               'closingPrice':95438.89,'trade':96869.67,'previousClosingPrice':96681.01}
+        self.assertEqual(parse_byma_quote({'data':[row]},TODAY)[0][1],95438.89)
+        row['date']='2026-10-27'
+        self.assertEqual(parse_byma_quote({'data':[row]},TODAY),[])
+        row['symbol']='GMSCI'
+        with self.assertRaises(ValueError): parse_byma_quote({'data':[row]},TODAY)
+
     def test_rofex_uses_settlement_zero_volume_and_thirteen_months(self):
         p = {'data':[dict(dateTime='2026-10-28T00:00:00Z',symbol='DLR102027',
                           product='DLR',settlement=1900,close=0,volume=0)]}
@@ -62,6 +86,20 @@ class Sources(unittest.TestCase):
             with self.assertRaises(ValueError): parse_cronista(html(invalid),TODAY)
 
 class Workbook(unittest.TestCase):
+    def test_report_does_not_equate_successful_fetch_with_current_day_data(self):
+        with tempfile.TemporaryDirectory() as folder:
+            book = Path(folder)/BOOK.name; shutil.copy2(BOOK,book)
+            yesterday=date(2026,10,27)
+            result=apply_results(book,{'Merval':[[yesterday,96681.01,None,None,None,None,'PUBLICADO']],
+                          'SOFR':[[yesterday,0.0395,'PUBLICADO']]},{},NOW)
+            self.assertEqual(result['errores'],{})
+            self.assertIn('Merval',result['pendientes_fecha_consulta'])
+            self.assertNotIn('SOFR',result['pendientes_fecha_consulta'])
+            self.assertEqual(result['cobertura']['Merval']['ultima_fecha_dato'],'2026-10-27')
+            wb=load_workbook(book)
+            self.assertIn('Merval: pendiente 2026-10-28',wb['Fuente']['B3'].value)
+            wb.close()
+
     def test_calendar_effective_date_and_rofex_month_order(self):
         with tempfile.TemporaryDirectory() as folder:
             book = Path(folder)/BOOK.name; shutil.copy2(BOOK,book)
