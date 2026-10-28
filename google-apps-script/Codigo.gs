@@ -90,3 +90,15 @@ function doPost(e) {
     if (adquirido) bloqueo.releaseLock();
   }
 }
+
+// Comprobación manual: no envía solicitudes ni modifica archivos.
+function revisarPermisoActualizacion() {
+  ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, ['https://www.googleapis.com/auth/script.external_request']);
+  UrlFetchApp.getRequest('https://www.googleapis.com/drive/v3/files');
+  console.log('Permiso de actualización disponible. No se enviaron solicitudes ni se modificaron archivos.');
+}
+
+function mostrarAutorizacion() {
+  console.log(ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL).getAuthorizationUrl());
+}
+
