@@ -1,6 +1,8 @@
 # Excel BNA diario en Google Drive
 
-GitHub Actions ejecuta `actualizar_drive.py` todos los días a las **19:05 de Argentina** (22:05 UTC), aunque tu Mac esté apagada. GitHub puede demorar el inicio: no es un horario garantizado. Esta tarea aún debe publicarse y autorizarse; guardar el entorno de Codex no la activa.
+GitHub Actions ejecuta `actualizar_drive.py` todos los días a las **19:05 de Argentina** (22:05 UTC), aunque tu Mac esté apagada. GitHub puede demorar el inicio: no es un horario garantizado. El workflow ya está publicado y activo; falta configurar la autorización y la carpeta de Drive para completar las actualizaciones remotas. Guardar el entorno de Codex no sustituye esa autorización.
+
+La ejecución [40618043814](https://github.com/Nicons11/Datos-economicos-diarios/actions/runs/40618043814) pasó las ocho pruebas y la consulta real a Errepar con actualización del libro local del runner. No accedió a Drive. Para repetir esa comprobación, usá Run workflow y activá `comprobar_fuente`; para el flujo completo dejá esa opción desactivada.
 
 ## Qué hace
 
@@ -10,7 +12,7 @@ Conserva las cuatro series, historial, fechas efectivas y marcas de datos provis
 
 ## Activar una vez
 
-1. Subí el contenido de esta carpeta, incluida `.github/workflows/actualizar.yml`, a la rama predeterminada de `Nicons11/Datos-economicos-diarios`. Nunca subas tokens o credenciales. En GitHub, habilitá Actions si está deshabilitado.
+1. El contenido ya está publicado en la rama `main` de `Nicons11/Datos-economicos-diarios` y Actions está activo. Nunca subas tokens o credenciales al repositorio.
 2. Creá una carpeta de Google Drive para este Excel. Su ID es la parte final de su enlace (`.../folders/ID`). Podés dejarla vacía o subir el Excel inicial sin convertirlo ni cambiar el nombre. No debe haber dos archivos con ese nombre.
 3. En Google Cloud, habilitá **Google Drive API**. Configurá el consentimiento OAuth y creá un cliente OAuth de tipo **Aplicación de escritorio**. Descargá su JSON fuera del repositorio. La autorización solicita acceso a Drive para buscar, leer y actualizar el archivo; usá una cuenta dedicada si preferís limitar el alcance a esa cuenta. Si tu organización restringe OAuth, necesitarás su autorización.
 4. En tu computadora, con Python 3.10 o posterior, instalá `python3 -m pip install -r requirements-cloud.txt`. Ejecutá una única vez `python3 autorizar_drive.py /ruta/cliente.json /ruta/privada/token-drive.json`. Se abre Google para autorizar. Elegí una ruta de salida fuera del repositorio. No compartas ese archivo ni lo pegues en el chat.
