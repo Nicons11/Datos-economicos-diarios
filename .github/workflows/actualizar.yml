@@ -34,7 +34,7 @@ jobs:
         if: ${{ !inputs.comprobar_fuente }}
         env:
           GOOGLE_DRIVE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID || '1o4O5rZIrIEjiwMHkRw1iYDTPHb2kBxmk' }}
         run: python actualizar_drive.py
       - name: Comprobar consulta real a Errepar
         if: ${{ inputs.comprobar_fuente }}
