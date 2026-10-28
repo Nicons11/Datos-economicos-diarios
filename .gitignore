@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+evidencia/
+respaldos/
+*.tmp.xlsx
+credenciales*.json
+token*.json
