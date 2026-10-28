@@ -2,6 +2,7 @@
 import argparse
 import bisect
 import json
+import math
 import shutil
 import tempfile
 from datetime import date, datetime, timedelta
@@ -9,19 +10,18 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from actualizar_oficial import BOOK
-from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, INDICES, cronista, investing, rofex, sofr
+from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, INDICES, cronista, index_data, index_url, rofex, sofr
 
 ROOT = Path(__file__).resolve().parent
 REPORT = ROOT / 'evidencia' / 'resultado.json'
 SCHEMAS = {
     'Cotizaciones': ['Fecha', 'BNA compra (ARS/USD)', 'BNA venta (ARS/USD)', 'Fecha efectiva', 'Estado', 'Captura (Argentina)'],
-    **{name: ['Fecha', 'Cierre (puntos)', 'Apertura (puntos)', 'Máximo (puntos)', 'Mínimo (puntos)',
-              'Variación diaria', 'Estado', 'Captura (Argentina)'] for name in INDICES},
+    **{name: ['Fecha', 'Cierre (puntos)', 'Estado', 'Captura (Argentina)'] for name in INDICES},
     'ROFEX': ['Fecha rueda', 'Contrato', 'Mes contrato', 'Ajuste (ARS/USD)', 'Estado', 'Captura (Argentina)'],
     'SOFR': ['Fecha efectiva', 'SOFR anual (%)', 'Estado', 'Captura (Argentina)'],
 }
 URLS = {'Cotizaciones': CRONISTA, 'ROFEX': ROFEX, 'SOFR': SOFR,
-        **{name: f'https://www.investing.com/indices/{slug}-historical-data' for name,(slug,_) in INDICES.items()}}
+        **{name: index_url(name) for name in INDICES}}
 
 def as_date(value):
     return value.date() if isinstance(value, datetime) else value
@@ -57,9 +57,9 @@ def collect(book, evidence, now):
             if name == 'Cotizaciones': rows = cronista(evidence, today)
             elif name == 'SOFR': rows = sofr(evidence, today, start)
             elif name == 'ROFEX': rows = rofex(evidence, today, start)
-            else: rows = investing(name, evidence, today)
+            else: rows = index_data(name, evidence, today, start)
             # Las páginas históricas muestran un mes: nunca ocultar huecos tras una inactividad larga.
-            if old and name in ('Cotizaciones', *INDICES) and min(r[0] for r in rows) > max(r[0] for r in old):
+            if old and name == 'Cotizaciones' and min(r[0] for r in rows) > max(r[0] for r in old):
                 raise ValueError('El historial visible no solapa con el Excel: recuperar el intervalo faltante')
             results[name] = rows
         except Exception as exc:
@@ -76,7 +76,7 @@ def format_sheet(ws, name, rows, now):
     notes = {'Cotizaciones': 'Compra y venta BNA. Días sin fila: último dato disponible, identificado por Fecha efectiva y Estado.',
              'ROFEX': 'Precio de ajuste oficial, incluso sin volumen. Mes actual y 12 siguientes por rueda; faltantes quedan vacíos.',
              'SOFR': 'Tasa anual overnight. Fecha efectiva del dato; no es la fecha de publicación ni Term SOFR.',
-             'Merval': 'MSCI Merval según Investing. Serie separada del antiguo S&P Merval; no se empalman bases.'}
+             'Merval': 'MSCI Merval según BYMA desde 19/10/2026. Sin empalmar S&P. Ceros de la fuente: sin dato publicado.'}
     ws['A4'] = notes.get(name, 'Índice al cierre de cada fecha publicada. La fila del día queda provisional hasta la próxima consulta.')
     latest = max(r[3] for r in rows) if name == 'Cotizaciones' else max(r[0] for r in rows)
     ws['A5'] = 'Última fecha disponible: ' + latest.strftime('%d/%m/%Y')
@@ -99,7 +99,6 @@ def format_sheet(ws, name, rows, now):
             if isinstance(cell.value, (date,datetime)): cell.number_format = 'dd/mm/yyyy'
             elif isinstance(cell.value, (float,int)): cell.number_format = '#,##0.00'
         row[-1].number_format = 'dd/mm/yyyy hh:mm:ss'
-        if name in INDICES: row[5].number_format = '0.00%'
         if name == 'SOFR': row[1].number_format = '0.00%'
         if name == 'ROFEX': row[2].number_format = 'mmm yyyy'
     state_column = len(headers) - 1
@@ -123,7 +122,9 @@ def apply_results(book, results, errors, now):
         merged = {key(r): r for r in old}
         stamp = now.replace(tzinfo=None)
         for r in new:
-            record = [r[0],r[1],r[2],r[0],r[3],stamp] if name == 'Cotizaciones' else [*r,stamp]
+            if name == 'Cotizaciones': record = [r[0],r[1],r[2],r[0],r[3],stamp]
+            elif name in INDICES: record = [r[0],r[1],r[-1],stamp]
+            else: record = [*r,stamp]
             merged[key(record)] = record
         rows = [merged[k] for k in sorted(merged)]
         if name == 'Cotizaciones':
@@ -141,15 +142,15 @@ def apply_results(book, results, errors, now):
     if 'Fuente' in wb.sheetnames: del wb['Fuente']
     src = wb.create_sheet('Fuente')
     src.append(['Fuentes · ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' Argentina', 'Estado de la última consulta'])
-    for group, names in [('BNA · El Cronista',['Cotizaciones']), ('Índices · Investing',list(INDICES)),
+    for group, names in [('BNA · El Cronista',['Cotizaciones']), ('Índices · Yahoo / BYMA',list(INDICES)),
                          ('ROFEX · A3',['ROFEX']), ('SOFR · New York Fed',['SOFR'])]:
-        status = '; '.join(name + ': ' + (errors[name] if name in errors else 'actualizado' if name in results else 'sin consultar') for name in names)
+        status = '; '.join(name + ': ' + (errors[name].splitlines()[0][:180] if name in errors else 'actualizado' if name in results else 'sin consultar') for name in names)
         src.append([group,status])
     src.column_dimensions['A'].width = 35; src.column_dimensions['B'].width = 115
     for row in src:
         for cell in row:
             cell.alignment = Alignment(wrap_text=True,vertical='center'); cell.font = Font(name='Arial',size=10,color='172B3A')
-        src.row_dimensions[row[0].row].height = 45
+        src.row_dimensions[row[0].row].height = max(45,math.ceil(len(str(row[1].value))/100)*15)
     if 'Cotizaciones' in wb.sheetnames:
         wb.move_sheet('Cotizaciones',offset=-wb.sheetnames.index('Cotizaciones'))
         wb.active = wb['Cotizaciones']

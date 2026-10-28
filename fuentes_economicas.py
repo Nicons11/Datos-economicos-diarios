@@ -1,10 +1,8 @@
 """Lectura y validación de fuentes públicas. No modifica libros ni opera mercados."""
 import json
 import math
-import os
 import re
 from datetime import date, datetime, timedelta, timezone
-from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 import requests
 
@@ -18,6 +16,65 @@ INDICES = {
     'Merval': ('msci-merval', 'MSCI Merval'),
     'SSEC': ('shanghai-composite', 'Shanghai Composite'),
 }
+YAHOO = {'Bovespa': '^BVSP', 'SP500': '^GSPC', 'SSEC': '000001.SS'}
+BYMA = 'https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/chart/index-historical-series/history'
+
+def index_url(name):
+    from urllib.parse import quote
+    return BYMA if name == 'Merval' else 'https://query1.finance.yahoo.com/v8/finance/chart/' + quote(YAHOO[name], safe='')
+
+def parse_yahoo(payload, symbol, today):
+    chart = payload['chart']
+    if chart.get('error') or len(chart.get('result') or []) != 1: raise ValueError('Yahoo sin una serie única')
+    item = chart['result'][0]; meta = item['meta']
+    if meta.get('symbol') != symbol or meta.get('instrumentType') != 'INDEX':
+        raise ValueError('Yahoo devolvió otro instrumento')
+    zone = ZoneInfo(meta['exchangeTimezoneName']); quote = item['indicators']['quote'][0]
+    timestamps = item['timestamp']
+    if len(quote['close']) != len(timestamps): raise ValueError('Serie Yahoo incompleta')
+    result = {}; valid = []
+    for i,t in enumerate(timestamps):
+        d = datetime.fromtimestamp(t,timezone.utc).astimezone(zone).date()
+        if d > today or d in result: raise ValueError('Fecha Yahoo futura o duplicada')
+        close = quote['close'][i]
+        if close is None:
+            if d < today: result[d] = [d,None,None,None,None,None,'SIN DATO PUBLICADO']
+            continue
+        close = number(close); valid.append(d)
+        status = 'PROVISIONAL; VERIFICAR EN PRÓXIMA RUEDA' if d == today else 'CIERRE PUBLICADO'
+        result[d] = [d,close,None,None,None,None,status]
+    if not valid or (today-max(valid)).days > 7: raise ValueError('Yahoo sin cierres recientes')
+    return [result[d] for d in sorted(result)]
+
+def parse_byma(payload, today):
+    if payload.get('s') != 'ok': raise ValueError('BYMA sin serie histórica')
+    if len(payload['t']) != len(payload['c']): raise ValueError('Serie BYMA incompleta')
+    result = {}; valid = []
+    # Cambio de administrador/base anunciado por BYMA para el 19/10/2026.
+    # No empalmar el antiguo S&P con MSCI, aunque el endpoint reutilice el código M.
+    for t,c in zip(payload['t'],payload['c']):
+        d = datetime.fromtimestamp(t,timezone.utc).astimezone(TZ).date()
+        if d < date(2026,10,19): continue
+        if d > today or d in result: raise ValueError('Fecha BYMA futura o duplicada')
+        if c is None or c == 0:
+            result[d] = [d,None,None,None,None,None,'SIN DATO PUBLICADO POR BYMA']
+        else:
+            close = number(c); valid.append(d)
+            result[d] = [d,close,None,None,None,None,
+                         'PROVISIONAL' if d == today else 'CIERRE PUBLICADO POR BYMA']
+    if not valid or (today-max(valid)).days > 7: raise ValueError('BYMA sin cierres recientes de MSCI Merval')
+    return [result[d] for d in sorted(result)]
+
+def index_data(name, evidence, today, start):
+    if name == 'Merval':
+        return parse_byma(get(BYMA,evidence,'Merval.json',{
+            'symbol':'M','resolution':'D',
+            'from':int(datetime.combine(start,datetime.min.time(),TZ).timestamp()),
+            'to':int(datetime.combine(today+timedelta(days=1),datetime.min.time(),TZ).timestamp())}).json(),today)
+    return parse_yahoo(get(index_url(name),evidence,name+'.json',{
+        'period1':int(datetime.combine(start,datetime.min.time(),timezone.utc).timestamp()),
+        'period2':int(datetime.combine(today+timedelta(days=1),datetime.min.time(),timezone.utc).timestamp()),
+        'interval':'1d'}).json(),YAHOO[name],today)
 
 def number(value, positive=True):
     if isinstance(value, bool) or value is None:
@@ -83,75 +140,6 @@ def parse_cronista(html, today):
 
 def cronista(evidence, today):
     return parse_cronista(get(CRONISTA, evidence, 'cronista.html').text, today)
-
-class Tables(HTMLParser):
-    def __init__(self):
-        super().__init__(); self.tables = []; self.table = None; self.row = None; self.cell = None
-    def handle_starttag(self, tag, attrs):
-        if tag == 'table': self.table = []
-        elif tag == 'tr' and self.table is not None: self.row = []
-        elif tag in ('td', 'th') and self.row is not None: self.cell = []
-    def handle_data(self, data):
-        if self.cell is not None: self.cell.append(data)
-    def handle_endtag(self, tag):
-        if tag in ('td', 'th') and self.cell is not None:
-            self.row.append(''.join(self.cell).strip()); self.cell = None
-        elif tag == 'tr' and self.row is not None:
-            self.table.append(self.row); self.row = None
-        elif tag == 'table' and self.table is not None:
-            self.tables.append(self.table); self.table = None
-
-def parse_index(html, today, expected):
-    if expected not in html:
-        raise ValueError('Investing devolvió otro instrumento o un bloqueo')
-    parser = Tables(); parser.feed(html)
-    matches = [t for t in parser.tables if t and t[0][:5] == ['Date', 'Price', 'Open', 'High', 'Low']]
-    if len(matches) != 1:
-        raise ValueError('No se encontró una tabla histórica diaria única de Investing')
-    result = {}; headers = matches[0][0]
-    for row in matches[0][1:]:
-        if len(row) != len(headers):
-            raise ValueError('Fila incompleta en Investing')
-        d = datetime.strptime(row[0], '%b %d, %Y').date()
-        if d > today or d in result:
-            raise ValueError('Fecha futura o duplicada en Investing')
-        close, opening, high, low = [number(v) for v in row[1:5]]
-        if not low <= close <= high or not low <= opening <= high:
-            raise ValueError('Cierre o apertura fuera del mínimo/máximo')
-        change = number(row[headers.index('Change %')], positive=False) / 100
-        status = 'PROVISIONAL; VERIFICAR EN PRÓXIMA RUEDA' if d == today else 'HISTÓRICO PUBLICADO'
-        result[d] = [d, close, opening, high, low, change, status]
-    if not result or (today - max(result)).days > 7:
-        raise ValueError('Histórico Investing vacío o sin actualización reciente')
-    return [result[d] for d in sorted(result)]
-
-def investing(name, evidence, today):
-    slug, label = INDICES[name]
-    url = f'https://www.investing.com/indices/{slug}-historical-data'
-    try:
-        html = get(url, evidence, name + '.html').text
-        return parse_index(html, today, label)
-    except (requests.RequestException, ValueError):
-        # Navegación normal: no se resuelven desafíos ni se eluden bloqueos.
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            kwargs = {'headless': True}
-            if os.environ.get('BNA_CHROMIUM_EXECUTABLE'):
-                kwargs['executable_path'] = os.environ['BNA_CHROMIUM_EXECUTABLE']
-            browser = p.chromium.launch(**kwargs)
-            try:
-                page = browser.new_page(locale='en-US', timezone_id='America/Argentina/Buenos_Aires')
-                page.goto(url, wait_until='domcontentloaded', timeout=60000)
-                page.get_by_role('heading', name=label + ' Historical Data', exact=True).wait_for(timeout=30000)
-                page.locator('table').filter(has_text='Change %').first.wait_for(timeout=30000)
-                html = page.content()
-                (evidence / (name + '.html')).write_text(html)
-                page.screenshot(path=str(evidence / (name + '.png')), full_page=True)
-                (evidence / (name + '.html.meta.json')).write_text(json.dumps({
-                    'url': page.url, 'captured_at': datetime.now(TZ).isoformat()}))
-                return parse_index(html, today, label)
-            finally:
-                browser.close()
 
 def parse_sofr(payload, today):
     result = {}

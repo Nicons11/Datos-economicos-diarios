@@ -7,7 +7,7 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 from openpyxl import load_workbook
-from fuentes_economicas import TZ, parse_sofr, parse_rofex, parse_index, parse_cronista, month_offset
+from fuentes_economicas import TZ, parse_sofr, parse_rofex, parse_yahoo, parse_byma, parse_cronista, month_offset
 from actualizar_economicos import apply_results, existing_rows, ROOT, BOOK
 
 TODAY = date(2026,10,28)
@@ -33,15 +33,23 @@ class Sources(unittest.TestCase):
         p['refRates'] *= 2
         with self.assertRaises(ValueError): parse_sofr(p,TODAY)
 
-    def test_investing_dates_numbers_ranges_and_stale(self):
-        html = '<h1>Bovespa Historical Data</h1><table><tr>' + ''.join('<th>'+s+'</th>' for s in
-                ['Date','Price','Open','High','Low','Vol.','Change %']) + '</tr><tr>' + ''.join('<td>'+s+'</td>' for s in
-                ['Oct 28, 2026','170,000','169,000','171,000','168,000','12M','+1.20%']) + '</tr></table>'
-        r = parse_index(html,TODAY,'Bovespa')[0]
-        self.assertEqual(r[1],170000); self.assertAlmostEqual(r[5],0.012)
-        self.assertIn('PROVISIONAL',r[-1])
-        for invalid in [html.replace('170,000','172,000'),html.replace('Oct 28','Oct 08'),html.replace('Date','Fecha')]:
-            with self.assertRaises(ValueError): parse_index(invalid,TODAY,'Bovespa')
+    def test_yahoo_symbol_timezone_missing_and_stale(self):
+        p = {'chart':{'error':None,'result':[{'meta':{'symbol':'^GSPC','instrumentType':'INDEX',
+              'exchangeTimezoneName':'America/New_York'},'timestamp':[int(NOW.timestamp())],
+              'indicators':{'quote':[{'close':[7700]}]}}]}}
+        r = parse_yahoo(p,'^GSPC',TODAY)[0]
+        self.assertEqual(r[1],7700); self.assertIn('PROVISIONAL',r[-1])
+        with self.assertRaises(ValueError): parse_yahoo(p,'^BVSP',TODAY)
+        p['chart']['result'][0]['indicators']['quote'][0]['close'] = [None]
+        with self.assertRaises(ValueError): parse_yahoo(p,'^GSPC',TODAY)
+
+    def test_byma_does_not_splice_bases_or_load_zeros_as_closes(self):
+        days = [date(2026,10,16),date(2026,10,19),date(2026,10,27)]
+        p = {'s':'ok','t':[int(datetime.combine(d,datetime.min.time(),TZ).timestamp()) for d in days],
+             'c':[2800000,0,96681.01]}
+        rows = parse_byma(p,TODAY)
+        self.assertEqual(len(rows),2); self.assertIsNone(rows[0][1])
+        self.assertEqual(rows[-1][1],96681.01)
 
     def test_cronista_exact_identity_and_spread(self):
         ms = int(NOW.timestamp()*1000)
