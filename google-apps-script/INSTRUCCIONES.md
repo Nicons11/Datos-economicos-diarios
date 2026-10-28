@@ -13,3 +13,12 @@ Esta opción sustituye la creación de un cliente OAuth en Google Cloud. La auto
 La carpeta está fijada en el código y solo se acepta `Tipo_de_Cambio_BNA.xlsx`. Las solicitudes llevan firma HMAC, fecha y un identificador; se rechazan firmas inválidas, solicitudes vencidas y repeticiones conservadas en la caché. Apps Script aplica cuotas antes de ejecutar el código, por lo que no publiques innecesariamente la URL. Para revocar la conexión, archivá la implementación o eliminá su clave. Si modificás el código, actualizá la implementación a una versión nueva.
 
 El programa descarga primero la versión de Drive, consulta Errepar y solo después envía el libro validado. Conserva el ID del archivo existente. Se comprueba la fecha de modificación antes de escribir; evitá editar simultáneamente porque esa comprobación no bloquea cambios hechos desde Drive. No se ha validado el despliegue real hasta que el usuario complete la autorización y la implementación.
+
+# Si Google permite leer, pero rechaza actualizar el Excel
+
+Si aparece `script.external_request`, el proyecto tiene Drive autorizado pero falta consentir la conexión con la API que actualiza el binario del archivo existente. Una primera ejecución que crea el archivo puede funcionar sin ese permiso y fallar recién al intentar reemplazar su contenido.
+
+Abrí el proyecto **Excel diario** en Chrome con la cuenta propietaria. Elegí la función `revisarPermisoActualizacion`, pulsá **Ejecutar** y después **Revisar permisos**. Concedé el permiso **Conectarse a un servicio externo**. La función solo verifica el permiso, sin enviar solicitudes ni modificar archivos. Si Google muestra un error al abrir el consentimiento en un navegador integrado, completá ese paso desde Chrome.
+
+El usuario autorizó expresamente este permiso para guardar el mismo Excel mediante la API de Google Drive. No se necesita cambiar ni compartir la clave privada ni generar otra URL. Después repetí el workflow y comprobá el mensaje **Excel guardado y verificado en Google Drive**.
+
