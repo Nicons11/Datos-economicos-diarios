@@ -22,6 +22,8 @@ Se conservan HTML/JSON, fecha de captura y URL de cada consulta en `evidencia/`,
 
 ## Uso y pruebas
 
+Para agregar un pedido diario independiente desde Google alrededor de las 20:00 de Argentina, seguir [Segundo programador en Apps Script](google-apps-script/PROGRAMADOR.md). Requiere instalar el archivo adicional y autorizar un token de GitHub en las propiedades del proyecto; publicar este código no instala el disparador.
+
 ```sh
 python -m pip install -r requirements-cloud.txt
 python -m playwright install --with-deps chromium

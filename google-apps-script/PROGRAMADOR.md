@@ -1,0 +1,19 @@
+# Segundo programador: Google pide la ejecución a GitHub
+
+Este disparador es independiente del cron de GitHub y funciona con la Mac apagada. Comprueba la hora de Argentina cada cinco minutos y solicita una ejecución una vez al día durante la hora de las 20. Google puede demorar u omitir disparadores: no garantiza las 20:00 exactas. Que GitHub acepte el pedido tampoco garantiza que la consulta o el guardado hayan terminado; comprobar Actions.
+
+## Agregar al proyecto existente
+
+1. Abrí el proyecto **Excel diario** de Apps Script. En **Archivos**, pulsá **+ → Secuencia de comandos**, nombrá el archivo **Programador**, reemplazá su contenido con `Programador.gs` de esta carpeta y guardá. Conservá `Código.gs` y todas las propiedades existentes. No hace falta volver a implementar la aplicación web: el disparador usa el código guardado.
+2. Abrí https://github.com/settings/personal-access-tokens/new para crear un **fine-grained personal access token**. Nombre sugerido **Programador Excel diario**. Resource owner: **Nicons11**. En Repository access elegí **Only select repositories → Datos-economicos-diarios**. En Repository permissions habilitá solo **Actions: Read and write**; Metadata Read se incluye automáticamente. Elegí un vencimiento y anotá cuándo renovarlo. Este token permite gestionar Actions de ese repositorio; no necesita permisos de contenido ni acceso a otros repositorios. Si GitHub solicita aprobación organizacional, debe completarse antes de usarlo.
+3. Generá el token y copialo directamente a Apps Script → engranaje **Configuración del proyecto → Propiedades de la secuencia de comandos → Agregar propiedad**. Nombre **TOKEN_GITHUB**, valor el token. Guardá. No lo pegues en el chat, código, capturas o repositorio. Conservá **CLAVE_GITHUB**: es otra clave con otra finalidad.
+4. En el editor, seleccioná **probarActualizacionGitHub → Ejecutar**. Aceptá los permisos de tu propio proyecto si Google los pide. El registro debe decir que GitHub aceptó el pedido. Revisá Actions hasta que termine la ejecución y el guardado en Drive. Un HTTP 401/403 puede indicar token vencido, permisos insuficientes o aprobación pendiente; 404 puede indicar repositorio/workflow inaccesible; 422 requiere revisar `main` y workflow_dispatch. No regeneres credenciales automáticamente sin investigar.
+5. Seleccioná **instalarProgramadorGitHub → Ejecutar** y autorizá la creación de disparadores. En el icono de reloj **Activadores**, comprobá que aparezca **revisarActualizacionGitHub** como disparador basado en tiempo. La función reemplaza únicamente disparadores anteriores del mismo nombre; no toca los demás.
+
+Google pide la ejecución una vez al día si obtiene HTTP 204. Si el pedido falla, la siguiente comprobación de esa hora vuelve a intentarlo. No detecta fallos posteriores del workflow ni los reintenta tras haber obtenido 204: para esos casos se conservan los horarios de respaldo en GitHub. La prueba manual no impide el pedido diario. Las solicitudes aceptadas en GitHub se serializan por el grupo de concurrencia existente. Una interrupción excepcional entre aceptar el pedido y guardar su marca puede causar un pedido duplicado.
+
+El token vencerá en la fecha elegida: reemplazá únicamente **TOKEN_GITHUB** antes de entonces. Configurá las notificaciones de fallos del activador en Google y de Actions en GitHub. Para desactivar este segundo programador ejecutá **desactivarProgramadorGitHub**; el puente de Drive y el cron de GitHub siguen funcionando.
+
+## Validación de desarrollo
+
+`node google-apps-script/test_programador.cjs` comprueba hora argentina, deduplicación, día siguiente, fallos HTTP, reintento del pedido y conservación de otros disparadores con servicios simulados. No prueba la autorización ni el disparador real de Google. La instalación está pendiente hasta completar los pasos anteriores en la cuenta del usuario.
