@@ -1,0 +1,33 @@
+name: Probar nuevas fuentes económicas
+on:
+  push:
+    branches: ['codex/nuevas-fuentes-economicas']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  comprobar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-cloud.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m unittest -v test_economicos test_apps_script test_cloud
+      - name: Consultar fuentes reales en copia aislada sin Drive
+        run: |
+          cp Tipo_de_Cambio_BNA.xlsx prueba.xlsx
+          python actualizar_economicos.py --book prueba.xlsx
+          python -c 'from actualizar_economicos import check_result; check_result()'
+      - name: Guardar resultado y evidencia
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prueba-economicos
+          path: |
+            prueba.xlsx
+            evidencia/
+          retention-days: 7

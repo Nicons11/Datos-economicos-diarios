@@ -35,12 +35,19 @@ def main():
     previous = exchange(url, key, 'read')
     if previous.get('content') is not None:
         BOOK.write_bytes(base64.b64decode(previous['content'], validate=True))
-    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_oficial.py')], check=True)
+    subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_economicos.py')], check=True)
     result = exchange(url, key, 'write', version=previous.get('version'),
                       content=base64.b64encode(BOOK.read_bytes()).decode('ascii'))
     if not result.get('fileId'):
         raise RuntimeError('Google no confirmó el ID del archivo guardado')
-    print('Excel actualizado en la carpeta de Google Drive.')
+    verified = exchange(url, key, 'read')
+    saved = base64.b64decode(verified.get('content') or '', validate=True)
+    if hashlib.sha256(saved).digest() != hashlib.sha256(BOOK.read_bytes()).digest():
+        raise RuntimeError('El contenido leído desde Drive no coincide con el Excel enviado; revisar cambios concurrentes')
+    print('Excel guardado y verificado en Google Drive: https://drive.google.com/file/d/' + result['fileId'] + '/view')
+    from actualizar_economicos import check_result
+    check_result()
 
 if __name__ == '__main__':
     main()
+
