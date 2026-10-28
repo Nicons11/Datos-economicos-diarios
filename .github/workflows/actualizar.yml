@@ -29,13 +29,20 @@ jobs:
       - run: python -m pip install -r requirements-cloud.txt
       - run: python -m playwright install --with-deps chromium
       - name: Pruebas sin Internet
-        run: python -m unittest -v test_cloud test_bna.Rules.test_exact_previous_order_duplicates_and_ignore_extra test_bna.Rules.test_unavailable_invalid_blank_future_and_today test_bna.Rules.test_parse test_bna.Rules.test_source_validation
+        run: python -m unittest -v test_apps_script test_cloud test_bna.Rules.test_exact_previous_order_duplicates_and_ignore_extra test_bna.Rules.test_unavailable_invalid_blank_future_and_today test_bna.Rules.test_parse test_bna.Rules.test_source_validation
       - name: Consultar Errepar y actualizar Drive
         if: ${{ !inputs.comprobar_fuente }}
         env:
           GOOGLE_DRIVE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS_JSON }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID || '1o4O5rZIrIEjiwMHkRw1iYDTPHb2kBxmk' }}
-        run: python actualizar_drive.py
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_KEY: ${{ secrets.APPS_SCRIPT_KEY }}
+        run: |
+          if [ -n "$APPS_SCRIPT_URL" ]; then
+            python actualizar_apps_script.py
+          else
+            python actualizar_drive.py
+          fi
       - name: Comprobar consulta real a Errepar
         if: ${{ inputs.comprobar_fuente }}
         run: python actualizar_oficial.py

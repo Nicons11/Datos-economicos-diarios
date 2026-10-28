@@ -12,6 +12,8 @@ Conserva las cuatro series, historial, fechas efectivas y marcas de datos provis
 
 ## Activar una vez
 
+**Opción elegida actualmente: Apps Script, sin cliente OAuth en Google Cloud.** Seguí [estas instrucciones](google-apps-script/INSTRUCCIONES.md). Usa los secretos `APPS_SCRIPT_URL` y `APPS_SCRIPT_KEY`. El usuario ya abrió un proyecto nuevo; falta pegar el código, autorizarlo e implementarlo. La alternativa OAuth que sigue es opcional y no hace falta completarla si usás Apps Script.
+
 1. El contenido ya está publicado en la rama `main` de `Nicons11/Datos-economicos-diarios` y Actions está activo. Nunca subas tokens o credenciales al repositorio.
 2. La carpeta de Drive proporcionada por el usuario ya está configurada como destino predeterminado en el workflow. Podés dejarla vacía o subir el Excel inicial sin convertirlo ni cambiar el nombre. No debe haber dos archivos con ese nombre. Para cambiarla, configurá `GOOGLE_DRIVE_FOLDER_ID` con el ID de otra carpeta (`.../folders/ID`). El ID identifica la ubicación y no concede acceso.
 3. En Google Cloud, habilitá **Google Drive API**. Configurá el consentimiento OAuth y creá un cliente OAuth de tipo **Aplicación de escritorio**. Descargá su JSON fuera del repositorio. La autorización solicita acceso a Drive para buscar, leer y actualizar el archivo; usá una cuenta dedicada si preferís limitar el alcance a esa cuenta. Si tu organización restringe OAuth, necesitarás su autorización.
