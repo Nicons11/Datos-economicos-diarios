@@ -21,6 +21,7 @@ jobs:
         run: |
           cp Tipo_de_Cambio_BNA.xlsx prueba.xlsx
           python actualizar_economicos.py --book prueba.xlsx
+          python -c 'from actualizar_economicos import check_result; check_result()'
       - name: Guardar resultado y evidencia
         if: always()
         uses: actions/upload-artifact@v4

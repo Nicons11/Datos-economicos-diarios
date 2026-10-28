@@ -1,5 +1,6 @@
 """Actualiza el mismo Excel de Drive con BNA, índices, futuros DLR y SOFR."""
 import argparse
+import bisect
 import json
 import shutil
 import tempfile
@@ -13,7 +14,7 @@ from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, INDICES, cronista, inv
 ROOT = Path(__file__).resolve().parent
 REPORT = ROOT / 'evidencia' / 'resultado.json'
 SCHEMAS = {
-    'Cotizaciones': ['Fecha', 'BNA compra (ARS/USD)', 'BNA venta (ARS/USD)', 'Estado', 'Captura (Argentina)'],
+    'Cotizaciones': ['Fecha', 'BNA compra (ARS/USD)', 'BNA venta (ARS/USD)', 'Fecha efectiva', 'Estado', 'Captura (Argentina)'],
     **{name: ['Fecha', 'Cierre (puntos)', 'Apertura (puntos)', 'Máximo (puntos)', 'Mínimo (puntos)',
               'Variación diaria', 'Estado', 'Captura (Argentina)'] for name in INDICES},
     'ROFEX': ['Fecha rueda', 'Contrato', 'Mes contrato', 'Ajuste (ARS/USD)', 'Estado', 'Captura (Argentina)'],
@@ -39,6 +40,7 @@ def existing_rows(wb, name):
         row = list(row); row[0] = as_date(row[0])
         if not isinstance(row[0], date): raise ValueError(f'Fecha inválida en {name}')
         if name == 'ROFEX': row[2] = as_date(row[2])
+        if name == 'Cotizaciones': row[3] = as_date(row[3])
         rows.append(row)
     keys = [(r[0], r[1]) if name == 'ROFEX' else r[0] for r in rows]
     if len(set(keys)) != len(keys): raise ValueError(f'Historial duplicado en {name}')
@@ -50,6 +52,7 @@ def collect(book, evidence, now):
     for name in SCHEMAS:
         try:
             old = existing_rows(wb, name)
+            if name == 'Cotizaciones': old = [r for r in old if r[0] == r[3]]
             start = max(r[0] for r in old) - timedelta(days=7) if old else today - timedelta(days=31)
             if name == 'Cotizaciones': rows = cronista(evidence, today)
             elif name == 'SOFR': rows = sofr(evidence, today, start)
@@ -70,12 +73,13 @@ def format_sheet(ws, name, rows, now):
                 'SOFR': 'Secured Overnight Financing Rate · Overnight'}.get(name, INDICES.get(name, ('', name))[1])
     ws['A2'] = 'Fuente: ' + URLS[name]
     ws['A3'] = 'Última consulta correcta: ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' (Argentina)'
-    notes = {'Cotizaciones': 'Compra y venta BNA de El Cronista. Fechas publicadas; no se inventan cotizaciones para feriados.',
+    notes = {'Cotizaciones': 'Compra y venta BNA. Días sin fila: último dato disponible, identificado por Fecha efectiva y Estado.',
              'ROFEX': 'Precio de ajuste oficial, incluso sin volumen. Mes actual y 12 siguientes por rueda; faltantes quedan vacíos.',
              'SOFR': 'Tasa anual overnight. Fecha efectiva del dato; no es la fecha de publicación ni Term SOFR.',
              'Merval': 'MSCI Merval según Investing. Serie separada del antiguo S&P Merval; no se empalman bases.'}
     ws['A4'] = notes.get(name, 'Índice al cierre de cada fecha publicada. La fila del día queda provisional hasta la próxima consulta.')
-    ws['A5'] = 'Última fecha disponible: ' + max(r[0] for r in rows).strftime('%d/%m/%Y')
+    latest = max(r[3] for r in rows) if name == 'Cotizaciones' else max(r[0] for r in rows)
+    ws['A5'] = 'Última fecha disponible: ' + latest.strftime('%d/%m/%Y')
     for r in range(1,6):
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(headers))
         ws.cell(r,1).alignment = Alignment(wrap_text=True, vertical='center')
@@ -83,7 +87,7 @@ def format_sheet(ws, name, rows, now):
     ws['A1'].font = Font(name='Arial', size=16, bold=True, color='172B3A')
     for c, header in enumerate(headers, 1):
         cell = ws.cell(6,c,header); cell.font = Font(name='Arial',bold=True,color='FFFFFF')
-        cell.fill = PatternFill('solid', fgColor='172B3A'); cell.alignment = Alignment(wrap_text=True)
+        cell.fill = PatternFill('solid', fgColor='172B3A'); cell.alignment = Alignment(wrap_text=True,vertical='center',horizontal='center')
         from openpyxl.utils import get_column_letter
         ws.column_dimensions[get_column_letter(c)].width = 23
     ws.row_dimensions[6].height = 32
@@ -111,14 +115,24 @@ def apply_results(book, results, errors, now):
     wb = load_workbook(book)
     for name, new in results.items():
         old = existing_rows(wb, name)
+        if name == 'Cotizaciones': old = [r for r in old if r[0] == r[3]]
         if name == 'Cotizaciones' and name in wb.sheetnames and not old:
             if 'Histórico Errepar' in wb.sheetnames: raise ValueError('Archivo histórico ya existe: revisar migración')
             wb[name].title = 'Histórico Errepar'
-        key = (lambda r: (r[0],r[1])) if name == 'ROFEX' else (lambda r: r[0])
+        key = (lambda r: (r[0],r[2])) if name == 'ROFEX' else (lambda r: r[0])
         merged = {key(r): r for r in old}
         stamp = now.replace(tzinfo=None)
-        for r in new: merged[key(r)] = [*r, stamp]
+        for r in new:
+            record = [r[0],r[1],r[2],r[0],r[3],stamp] if name == 'Cotizaciones' else [*r,stamp]
+            merged[key(record)] = record
         rows = [merged[k] for k in sorted(merged)]
+        if name == 'Cotizaciones':
+            dates = sorted(merged); rows = []; d = dates[0]
+            while d <= now.date():
+                effective = dates[bisect.bisect_right(dates,d)-1]
+                record = list(merged[effective]); record[0] = d
+                if effective != d: record[4] = 'SIN FILA PARA FECHA: anterior disponible'
+                rows.append(record); d += timedelta(days=1)
         position = wb.sheetnames.index(name) if name in wb.sheetnames else len(wb.sheetnames)
         if name in wb.sheetnames: del wb[name]
         ws = wb.create_sheet(name, position)
@@ -129,12 +143,16 @@ def apply_results(book, results, errors, now):
     src.append(['Fuentes · ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' Argentina', 'Estado de la última consulta'])
     for group, names in [('BNA · El Cronista',['Cotizaciones']), ('Índices · Investing',list(INDICES)),
                          ('ROFEX · A3',['ROFEX']), ('SOFR · New York Fed',['SOFR'])]:
-        status = '; '.join(name + ': ' + (errors[name] if name in errors else 'actualizado') for name in names)
+        status = '; '.join(name + ': ' + (errors[name] if name in errors else 'actualizado' if name in results else 'sin consultar') for name in names)
         src.append([group,status])
     src.column_dimensions['A'].width = 35; src.column_dimensions['B'].width = 115
     for row in src:
-        for cell in row: cell.alignment = Alignment(wrap_text=True,vertical='center')
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True,vertical='center'); cell.font = Font(name='Arial',size=10,color='172B3A')
         src.row_dimensions[row[0].row].height = 45
+    if 'Cotizaciones' in wb.sheetnames:
+        wb.move_sheet('Cotizaciones',offset=-wb.sheetnames.index('Cotizaciones'))
+        wb.active = wb['Cotizaciones']
     backupdir = book.parent / 'respaldos'; backupdir.mkdir(exist_ok=True)
     backup = backupdir / f'{book.stem}_{now:%Y%m%d_%H%M%S_%f}.xlsx'
     with tempfile.NamedTemporaryFile(dir=book.parent, suffix='.xlsx', delete=False) as handle:
