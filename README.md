@@ -1,17 +1,22 @@
-# Datos económicos diarios en el mismo Excel de Drive
+# Datos Financieros · Actualización diaria en el mismo Excel de Drive
 
-El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**, con consultas de respaldo a las **19:35 y 20:05**. GitHub puede demorar u omitir ejecuciones programadas; estos horarios no garantizan puntualidad. Las consultas se serializan para evitar ejecuciones simultáneas y revisan las correcciones publicadas por las fuentes. Conserva el ID y nombre `Tipo_de_Cambio_BNA.xlsx` de Drive mediante el puente Apps Script ya configurado; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola.
+El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**, con consultas de respaldo a las **19:35 y 20:05**. GitHub puede demorar u omitir ejecuciones programadas; estos horarios no garantizan puntualidad. Las consultas se serializan para evitar ejecuciones simultáneas. El puente reconoce el nombre anterior y renombra el libro a **Datos Financieros.xlsx** conservando el ID y enlace de Drive; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola. **La migración requiere actualizar una vez la implementación existente de Apps Script siguiendo [estos pasos](google-apps-script/ACTUALIZAR_NOMBRE.md)**. No se cambian claves ni el programador de Google. El cliente nuevo rechaza la implementación anterior antes de modificar Drive.
 
 ## Fuentes y hojas
 
-- **Cotizaciones**: compra y venta de Dólar BNA de [El Cronista](https://www.cronista.com/MercadosOnline/dolar.html/). Se identifica exactamente `ARS=BNAR`; no se usa blue, mayorista ni MEP. El histórico anterior de cuatro series se conserva íntegro en **Histórico Errepar** al migrar. Desde entonces no se consulta Errepar. Se conserva el calendario diario: los días sin fila usan el último dato disponible y muestran su fecha efectiva y estado de arrastre. El panel actual queda como observado y sin certificación de cierre; el histórico lo reemplaza en consultas posteriores.
+- **Cotizaciones**: compra y venta de Dólar BNA de [El Cronista](https://www.cronista.com/MercadosOnline/dolar.html/), identificado exactamente como `ARS=BNAR`. Se conserva el calendario diario, su fecha efectiva y estado de arrastre. El panel se identifica como observado sin certificar cierre.
+- **Errepar**: se retoma la consulta diaria de las cuatro series BNA (billete/divisa, compra/venta) en [Errepar](https://www.errepar.com/cotizacion-dolar). La hoja anterior **Histórico Errepar** se integra a **Errepar**, conservando su historia por fecha. La captura del día queda provisional. Nunca se sustituye esta fuente por Cronista ni se reutiliza evidencia vieja como consulta actual.
+- **Riesgo país**: serie argentina de [Ámbito](https://www.ambito.com/contenidos/riesgo-pais.html), en **puntos básicos**, con la fecha publicada. Se consulta su histórico público mediante navegación normal. No se rellena un día ausente con el anterior ni se divide por cien.
+- **FOREX**: [MAE histórico](https://marketdata.mae.com.ar/forex/historico), total diario del campo **VOLUMEN** dividido por un millón. A = Fecha, B = USD M, con un decimal como la referencia. No se utiliza el campo MONTO en pesos. Se conserva el valor subyacente sin redondearlo al almacenarlo.
+- **Cauciones**: [MAE histórico](https://marketdata.mae.com.ar/cauciones/historico), **CAARS en pesos**, menor plazo publicado entre 1 y 4 días; los viernes se observa plazo 003 hasta el lunes. A = Fecha, B = TNA% (t+1), C = TEA% (t+1), D = plazo de origen en días. Se usa **VWAP / tasaPP**, nunca última tasa. TEA equivalente diaria calculada como `(1 + TNA/365)^365 - 1`, reproduciendo la referencia; no se presenta como TEA publicada por MAE ni como rendimiento efectivo del contrato de varios días. Se añaden estado y captura. El 26/10/2026 reproduce 20,71% y 23,01%; el viernes 23/10 reproduce 20,57% y 22,83%.
 - **Bovespa, SP500 y SSEC**: cierres diarios de Yahoo Finance, símbolos `^BVSP`, `^GSPC` y `000001.SS`. Se valida identidad, tipo índice y fecha en la zona horaria del mercado. Las filas del día son provisionales y se revisan en la siguiente consulta. SSEC es Shanghai Composite.
 - **Merval**: cierres de MSCI Merval desde la API pública oficial de BYMA. Se utiliza el código histórico M, conservando solo el tramo desde el 19/10/2026 para no empalmarlo con el antiguo S&P Merval. Los ceros publicados por BYMA en la transición se muestran como faltantes, nunca como caídas de 100%.
-- **ROFEX**: futuros simples DLR de [A3 CEM](https://cem.matbarofex.com.ar/), campo `settlement` (ajuste oficial), incluyendo contratos sin volumen. Cada rueda conserva el mes actual y los doce siguientes: octubre de 2026 hasta octubre de 2027 inclusive son 13 posiciones. Se guarda fecha de rueda, contrato, mes y ajuste en ARS/USD. Un mes no publicado queda vacío con estado explícito. No se interpola ni se sustituye por el último negociado.
 - **SOFR**: tasa overnight anual de la [Reserva Federal de Nueva York](https://www.newyorkfed.org/markets/reference-rates/sofr/), obtenida de su API oficial. Se guarda fecha efectiva y revisiones. No es Term SOFR ni los promedios a 30/90/180 días. Se almacena como porcentaje Excel real.
 - **Fuente**: cinco renglones de metadatos y estado de la última consulta, según la preferencia del usuario.
 
-La primera consulta toma aproximadamente un mes de historia disponible. Después combina por fecha (y contrato en ROFEX), revisa un solapamiento reciente y conserva el historial. No es una descarga de historia completa. Si BNA no solapa con el historial del libro después de una inactividad prolongada, conserva esa hoja e informa el hueco para recuperarlo expresamente.
+**ROFEX se elimina del libro y deja de consultarse**, por pedido del usuario. El respaldo anterior a la migración conserva su contenido.
+
+La primera consulta toma aproximadamente un mes de historia disponible. Después combina por fecha, revisa un solapamiento reciente y conserva el historial. No es una descarga de historia completa. Si BNA no solapa con el historial del libro después de una inactividad prolongada, conserva esa hoja e informa el hueco para recuperarlo expresamente.
 
 ## Errores y conservación
 
@@ -27,7 +32,7 @@ Para agregar un pedido diario independiente desde Google alrededor de las 20:00 
 ```sh
 python -m pip install -r requirements-cloud.txt
 python -m playwright install --with-deps chromium
-python -m unittest -v test_economicos test_apps_script test_cloud
+python -m unittest -v test_financieros test_economicos test_apps_script test_cloud
 python actualizar_economicos.py --book copia-de-prueba.xlsx
 ```
 

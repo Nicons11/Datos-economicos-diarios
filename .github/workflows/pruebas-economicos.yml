@@ -18,8 +18,21 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: python -m unittest -v test_financieros test_economicos test_apps_script test_cloud
       - name: Consultar fuentes reales en copia aislada sin Drive
+        env:
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_KEY: ${{ secrets.APPS_SCRIPT_KEY }}
         run: |
-          cp Tipo_de_Cambio_BNA.xlsx prueba.xlsx
+          python - <<'PY'
+          import os,base64,shutil
+          from pathlib import Path
+          if os.environ.get('APPS_SCRIPT_URL') and os.environ.get('APPS_SCRIPT_KEY'):
+            from actualizar_apps_script import exchange
+            r=exchange(os.environ['APPS_SCRIPT_URL'],os.environ['APPS_SCRIPT_KEY'],'read')
+            Path('prueba.xlsx').write_bytes(base64.b64decode(r['content'],validate=True))
+            print('Copia de solo lectura del libro vigente obtenida; no se escribirá en Drive.')
+          else:
+            shutil.copy2('Tipo_de_Cambio_BNA.xlsx','prueba.xlsx')
+          PY
           python actualizar_economicos.py --book prueba.xlsx
           python -c 'from actualizar_economicos import check_result; check_result()'
       - name: Resumen verificable de la copia de prueba

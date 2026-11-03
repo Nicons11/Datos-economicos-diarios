@@ -35,6 +35,8 @@ class Sources(unittest.TestCase):
         self.assertEqual(parse_byma_quote({'data':[row]},TODAY)[0][1],95438.89)
         row['date']='2026-10-27'
         self.assertEqual(parse_byma_quote({'data':[row]},TODAY),[])
+        del row['date']
+        self.assertEqual(parse_byma_quote({'data':[row]},TODAY),[])
         row['symbol']='GMSCI'
         with self.assertRaises(ValueError): parse_byma_quote({'data':[row]},TODAY)
 
