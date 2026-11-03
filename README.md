@@ -1,5 +1,7 @@
 # Datos Financieros · Actualización diaria en el mismo Excel de Drive
 
+**Versión activada y verificada el 3/11/2026.** La [ejecución completa](https://github.com/Nicons11/Datos-economicos-diarios/actions/runs/41573838179) guardó y verificó el contenido en Drive. La [lectura posterior independiente](https://github.com/Nicons11/Datos-economicos-diarios/actions/runs/41573955361) confirmó el nombre **Datos Financieros.xlsx**, las hojas nuevas, el histórico de Errepar y la ausencia de ROFEX.
+
 El workflow `actualizar.yml` consulta las fuentes a las **19:05 de Argentina (22:05 UTC)**, con consultas de respaldo a las **19:35 y 20:05**. GitHub puede demorar u omitir ejecuciones programadas; estos horarios no garantizan puntualidad. Las consultas se serializan para evitar ejecuciones simultáneas. El puente reconoce el nombre anterior y renombra el libro a **Datos Financieros.xlsx** conservando el ID y enlace de Drive; no requiere que la Mac esté encendida. Una copia descargada no se sincroniza sola. **La migración requiere actualizar una vez la implementación existente de Apps Script siguiendo [estos pasos](google-apps-script/ACTUALIZAR_NOMBRE.md)**. No se cambian claves ni el programador de Google. El cliente nuevo rechaza la implementación anterior antes de modificar Drive.
 
 ## Fuentes y hojas
