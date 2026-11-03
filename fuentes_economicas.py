@@ -60,7 +60,11 @@ def parse_byma_quote(payload, today):
     matches = [r for r in payload.get('data',[]) if r.get('symbol') == 'MMSCI'
                and r.get('description','').strip().upper() == 'MSCI MERVAL']
     if len(matches) != 1: raise ValueError('BYMA no identificó una cotización única de MSCI Merval')
-    row = matches[0]; d = dated(row['date'],today)
+    row = matches[0]
+    # El panel puede omitir la fecha fuera de rueda. No reemplazar el histórico
+    # fechado ni atribuirle la fecha de consulta a una cotización sin fecha.
+    if not isinstance(row.get('date'), str): return []
+    d = dated(row['date'],today)
     if d != today or row.get('closingPrice') in (None,0): return []
     return [[d,number(row['closingPrice']),None,None,None,None,'CIERRE INFORMADO POR BYMA (COTIZACIÓN)']]
 

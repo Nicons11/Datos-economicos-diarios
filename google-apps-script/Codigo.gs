@@ -1,6 +1,7 @@
 // Puente privado entre GitHub Actions y el Excel de tu carpeta de Drive.
 const CARPETA = '1o4O5rZIrIEjiwMHkRw1iYDTPHb2kBxmk';
-const ARCHIVO = 'Tipo_de_Cambio_BNA.xlsx';
+const ARCHIVO = 'Datos Financieros.xlsx';
+const ARCHIVO_ANTERIOR = 'Tipo_de_Cambio_BNA.xlsx';
 const MIME_EXCEL = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // Ejecutar una sola vez desde el editor. No imprime la clave privada.
@@ -19,10 +20,15 @@ function respuesta_(objeto) {
 }
 
 function buscarArchivo_() {
-  const archivos = DriveApp.getFolderById(CARPETA).getFilesByName(ARCHIVO);
-  if (!archivos.hasNext()) return null;
-  const archivo = archivos.next();
-  if (archivos.hasNext()) throw new Error('Hay varios Excel con el mismo nombre en la carpeta');
+  const carpeta = DriveApp.getFolderById(CARPETA);
+  const encontrados = [];
+  for (const nombre of [ARCHIVO, ARCHIVO_ANTERIOR]) {
+    const archivos = carpeta.getFilesByName(nombre);
+    while (archivos.hasNext()) encontrados.push(archivos.next());
+  }
+  if (encontrados.length === 0) return null;
+  if (encontrados.length !== 1) throw new Error('Hay varios Excel con nombre actual o anterior; conservar un solo archivo principal');
+  const archivo = encontrados[0];
   if (archivo.getMimeType() !== MIME_EXCEL) throw new Error('El archivo debe conservar formato Excel, sin convertirlo a Google Sheets');
   return archivo;
 }
@@ -59,7 +65,7 @@ function doPost(e) {
     const archivo = buscarArchivo_();
     const version = archivo ? String(archivo.getLastUpdated().getTime()) : null;
     if (datos.action === 'read') {
-      return respuesta_({ok: true, version: version,
+      return respuesta_({ok: true, version: version, fileName: archivo ? archivo.getName() : ARCHIVO,
         content: archivo ? Utilities.base64Encode(archivo.getBlob().getBytes()) : null});
     }
     if (datos.action !== 'write' || typeof datos.content !== 'string') throw new Error('Operación inválida');
@@ -83,7 +89,8 @@ function doPost(e) {
     } else {
       guardado = DriveApp.getFolderById(CARPETA).createFile(blob);
     }
-    return respuesta_({ok: true, fileId: guardado.getId()});
+    if (guardado.getName() !== ARCHIVO) guardado.setName(ARCHIVO);
+    return respuesta_({ok: true, fileId: guardado.getId(), fileName: guardado.getName()});
   } catch (error) {
     return respuesta_({ok: false, error: String(error.message || 'Error de la conexión')});
   } finally {

@@ -35,6 +35,8 @@ class Sources(unittest.TestCase):
         self.assertEqual(parse_byma_quote({'data':[row]},TODAY)[0][1],95438.89)
         row['date']='2026-10-27'
         self.assertEqual(parse_byma_quote({'data':[row]},TODAY),[])
+        del row['date']
+        self.assertEqual(parse_byma_quote({'data':[row]},TODAY),[])
         row['symbol']='GMSCI'
         with self.assertRaises(ValueError): parse_byma_quote({'data':[row]},TODAY)
 
@@ -100,21 +102,20 @@ class Workbook(unittest.TestCase):
             self.assertIn('Merval: pendiente 2026-10-28',wb['Fuente']['B3'].value)
             wb.close()
 
-    def test_calendar_effective_date_and_rofex_month_order(self):
+    def test_calendar_effective_date_and_rofex_removed(self):
         with tempfile.TemporaryDirectory() as folder:
             book = Path(folder)/BOOK.name; shutil.copy2(BOOK,book)
             friday = date(2026,10,23)
             payload = {'data':[dict(dateTime='2026-10-27T00:00:00Z',symbol=s,
                        product='DLR',settlement=1500) for s in ['DLR012027','DLR102026','DLR102027']]}
             apply_results(book,{'Cotizaciones':[[friday,1500,1550,'HISTÓRICO PUBLICADO']],
-                               'ROFEX':parse_rofex(payload,TODAY)},{},NOW)
+                               'SOFR':[[date(2026,10,27),0.0395,'PUBLICADO']]},{},NOW)
             wb = load_workbook(book)
             rows = existing_rows(wb,'Cotizaciones')
             self.assertEqual(len(rows),6)
             self.assertEqual(rows[2][3],friday)
             self.assertIn('SIN FILA',rows[2][4])
-            months = [r[2] for r in existing_rows(wb,'ROFEX')]
-            self.assertEqual(months,sorted(months))
+            self.assertNotIn('ROFEX',wb.sheetnames)
             self.assertEqual(wb.active.title,'Cotizaciones')
             wb.close()
 
