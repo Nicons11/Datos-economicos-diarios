@@ -16,3 +16,18 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Inspeccionar respuestas públicas
         run: python investigar_fuentes.py
+      - name: Leer estructura del Excel vigente sin modificarlo
+        env:
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_KEY: ${{ secrets.APPS_SCRIPT_KEY }}
+        run: |
+          python -m pip install openpyxl
+          python - <<'PY'
+          import os,io,json,base64
+          from openpyxl import load_workbook
+          from actualizar_apps_script import exchange
+          r=exchange(os.environ['APPS_SCRIPT_URL'],os.environ['APPS_SCRIPT_KEY'],'read')
+          w=load_workbook(io.BytesIO(base64.b64decode(r['content'])),read_only=True,data_only=True)
+          info=[{'hoja':s.title,'filas':s.max_row,'encabezados':[c.value for c in s[6]],'ultima':list(s.values)[-1]} for s in w]
+          print('::notice title=Libro vigente::'+json.dumps(info,default=str,ensure_ascii=True).replace('%','%25'))
+          PY
