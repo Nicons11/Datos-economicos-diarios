@@ -1,4 +1,4 @@
-"""Actualiza el mismo Excel de Drive con BNA, índices, futuros DLR y SOFR."""
+"""Actualiza Datos Financieros: BNA, Errepar, índices, MAE, riesgo país y SOFR."""
 import argparse
 import bisect
 import json
@@ -10,17 +10,21 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from actualizar_oficial import BOOK
-from fuentes_economicas import TZ, CRONISTA, SOFR, ROFEX, BYMA_QUOTE, INDICES, cronista, index_data, index_url, rofex, sofr
+from fuentes_economicas import TZ, CRONISTA, SOFR, BYMA_QUOTE, INDICES, cronista, index_data, index_url, sofr
+from fuentes_financieras import ERREPAR, RIESGO, FOREX, CAUCIONES, errepar, riesgo_pais, mae
 
 ROOT = Path(__file__).resolve().parent
 REPORT = ROOT / 'evidencia' / 'resultado.json'
 SCHEMAS = {
     'Cotizaciones': ['Fecha', 'BNA compra (ARS/USD)', 'BNA venta (ARS/USD)', 'Fecha efectiva', 'Estado', 'Captura (Argentina)'],
     **{name: ['Fecha', 'Cierre (puntos)', 'Estado', 'Captura (Argentina)'] for name in INDICES},
-    'ROFEX': ['Fecha rueda', 'Contrato', 'Mes contrato', 'Ajuste (ARS/USD)', 'Estado', 'Captura (Argentina)'],
+    'Errepar': ['Fecha', 'Billete Compra', 'Billete Venta', 'Divisa Compra', 'Divisa Venta', 'Fecha efectiva', 'Estado', 'Captura (Argentina)'],
+    'FOREX': ['Fecha', 'USD M', 'Estado', 'Captura (Argentina)'],
+    'Cauciones': ['Fecha', 'TNA% (t+1)', 'TEA% (t+1)', 'Plazo origen (días)', 'Estado', 'Captura (Argentina)'],
+    'Riesgo país': ['Fecha', 'Riesgo país (puntos básicos)', 'Estado', 'Captura (Argentina)'],
     'SOFR': ['Fecha efectiva', 'SOFR anual (%)', 'Estado', 'Captura (Argentina)'],
 }
-URLS = {'Cotizaciones': CRONISTA, 'ROFEX': ROFEX, 'SOFR': SOFR,
+URLS = {'Cotizaciones': CRONISTA, 'Errepar': ERREPAR, 'FOREX': FOREX, 'Cauciones': CAUCIONES, 'Riesgo país': RIESGO, 'SOFR': SOFR,
         **{name: index_url(name) for name in INDICES}}
 URLS['Merval'] += ' | Cotización: ' + BYMA_QUOTE
 
@@ -28,8 +32,12 @@ def as_date(value):
     return value.date() if isinstance(value, datetime) else value
 
 def existing_rows(wb, name):
-    if name not in wb.sheetnames: return []
-    ws = wb[name]
+    actual = name
+    if name == 'Errepar' and name not in wb.sheetnames:
+        if 'Histórico Errepar' in wb.sheetnames: actual = 'Histórico Errepar'
+        elif 'Cotizaciones' in wb.sheetnames and wb['Cotizaciones'].cell(6,2).value == 'Billete Compra': actual = 'Cotizaciones'
+    if actual not in wb.sheetnames: return []
+    ws = wb[actual]
     headers = [ws.cell(6, c).value for c in range(1, len(SCHEMAS[name]) + 1)]
     if headers != SCHEMAS[name]:
         if name == 'Cotizaciones' and headers[:3] == ['Fecha', 'Billete Compra', 'Billete Venta']:
@@ -40,16 +48,16 @@ def existing_rows(wb, name):
         if row[0] is None: continue
         row = list(row); row[0] = as_date(row[0])
         if not isinstance(row[0], date): raise ValueError(f'Fecha inválida en {name}')
-        if name == 'ROFEX': row[2] = as_date(row[2])
         if name == 'Cotizaciones': row[3] = as_date(row[3])
+        if name == 'Errepar': row[5] = as_date(row[5])
         rows.append(row)
-    keys = [(r[0], r[1]) if name == 'ROFEX' else r[0] for r in rows]
+    keys = [r[0] for r in rows]
     if len(set(keys)) != len(keys): raise ValueError(f'Historial duplicado en {name}')
     return rows
 
 def valid_dates(name, rows):
-    column = 3 if name == 'ROFEX' else 1
-    return [r[3] if name == 'Cotizaciones' else r[0] for r in rows if r[column] is not None]
+    effective = 3 if name == 'Cotizaciones' else 5 if name == 'Errepar' else 0
+    return [r[effective] for r in rows if r[1] is not None]
 
 def coverage(wb, now):
     result = {}; today = now.date()
@@ -57,7 +65,7 @@ def coverage(wb, now):
         rows = existing_rows(wb,name); dates = valid_dates(name,rows)
         latest = max(dates) if dates else None
         count = sum(d == today for d in dates)
-        expected = 13 if name == 'ROFEX' else 1
+        expected = 1
         if name == 'SOFR': state = 'FECHA EFECTIVA PUBLICADA; NO EXIGIR FECHA DE CONSULTA'
         elif count >= expected: state = 'DATOS DE LA FECHA DE CONSULTA PRESENTES'
         else: state = 'PENDIENTE: faltan datos de la fecha de consulta'
@@ -76,7 +84,10 @@ def collect(book, evidence, now):
             start = max(r[0] for r in old) - timedelta(days=7) if old else today - timedelta(days=31)
             if name == 'Cotizaciones': rows = cronista(evidence, today)
             elif name == 'SOFR': rows = sofr(evidence, today, start)
-            elif name == 'ROFEX': rows = rofex(evidence, today, start)
+            elif name == 'Errepar': rows = errepar(evidence, today, start)
+            elif name == 'FOREX': rows = mae('forex', evidence, today, start)
+            elif name == 'Cauciones': rows = mae('cauciones', evidence, today, start)
+            elif name == 'Riesgo país': rows = riesgo_pais(evidence, today, start)
             else: rows = index_data(name, evidence, today, start)
             # Las páginas históricas muestran un mes: nunca ocultar huecos tras una inactividad larga.
             if old and name == 'Cotizaciones' and min(r[0] for r in rows) > max(r[0] for r in old):
@@ -89,12 +100,18 @@ def collect(book, evidence, now):
 
 def format_sheet(ws, name, rows, now):
     headers = SCHEMAS[name]
-    ws['A1'] = {'Cotizaciones': 'Tipo de cambio nominal · Dólar BNA', 'ROFEX': 'Futuros de dólar · Ajustes A3',
+    ws['A1'] = {'Cotizaciones': 'Tipo de cambio nominal · Dólar BNA', 'Errepar': 'Tipo de cambio BNA · Cuatro series Errepar',
+                'FOREX': 'Volumen operado de divisas (FOREX compra/venta) · Millones de USD',
+                'Cauciones': 'Costo de cauciones · CAARS en pesos · TNA y TEA',
+                'Riesgo país': 'Riesgo país de Argentina · Ámbito · Puntos básicos',
                 'SOFR': 'Secured Overnight Financing Rate · Overnight'}.get(name, INDICES.get(name, ('', name))[1])
     ws['A2'] = 'Fuente: ' + URLS[name]
     ws['A3'] = 'Última consulta correcta: ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' (Argentina)'
     notes = {'Cotizaciones': 'Compra y venta BNA. Días sin fila: último dato disponible, identificado por Fecha efectiva y Estado.',
-             'ROFEX': 'Precio de ajuste oficial, incluso sin volumen. Mes actual y 12 siguientes por rueda; faltantes quedan vacíos.',
+             'Errepar': 'Billete y divisa, compra y venta. Se conserva la fecha efectiva y el carácter provisional del dato del día.',
+             'FOREX': 'Total diario VOLUMEN de MAE dividido por 1.000.000; no es MONTO en pesos. No se rellena con el día anterior.',
+             'Cauciones': 'CAARS pesos, menor plazo publicado entre 1 y 4 días (3 en viernes). TNA = VWAP; TEA equivalente diaria calculada: (1 + TNA/365)^365 - 1, como la referencia. Plazo real informado; no es TEA publicada.',
+             'Riesgo país': 'Serie histórica de Ámbito en puntos básicos; no es un porcentaje. Se usa la fecha observada, sin arrastres.',
              'SOFR': 'Tasa anual overnight. Fecha efectiva del dato; no es la fecha de publicación ni Term SOFR.',
              'Merval': 'MSCI Merval desde 19/10/2026: histórico y cierre informado por BYMA. Sin empalmar S&P; ceros: sin publicación.'}
     ws['A4'] = notes.get(name, 'Valores publicados por la fuente. Si falta el histórico diario, se identifica la cotización de referencia en Estado.')
@@ -120,7 +137,10 @@ def format_sheet(ws, name, rows, now):
             elif isinstance(cell.value, (float,int)): cell.number_format = '#,##0.00'
         row[-1].number_format = 'dd/mm/yyyy hh:mm:ss'
         if name == 'SOFR': row[1].number_format = '0.00%'
-        if name == 'ROFEX': row[2].number_format = 'mmm yyyy'
+        if name == 'Cauciones':
+            row[1].number_format = row[2].number_format = '0.00%'
+        if name == 'FOREX': row[1].number_format = '#,##0.0'
+        if name == 'Riesgo país': row[1].number_format = '#,##0'
     state_column = len(headers) - 1
     ws.column_dimensions[get_column_letter(state_column)].width = 58
     ws.column_dimensions[get_column_letter(len(headers))].width = 27
@@ -129,6 +149,7 @@ def format_sheet(ws, name, rows, now):
 
 def apply_results(book, results, errors, now):
     if not results: raise ValueError('Ninguna fuente validó; se conserva el libro anterior')
+    if set(results) - set(SCHEMAS): raise ValueError('Resultado de una fuente no habilitada')
     lock = book.parent / ('~$' + book.name)
     if lock.exists(): raise ValueError('Excel abierto; cerrar antes de actualizar')
     wb = load_workbook(book)
@@ -138,7 +159,7 @@ def apply_results(book, results, errors, now):
         if name == 'Cotizaciones' and name in wb.sheetnames and not old:
             if 'Histórico Errepar' in wb.sheetnames: raise ValueError('Archivo histórico ya existe: revisar migración')
             wb[name].title = 'Histórico Errepar'
-        key = (lambda r: (r[0],r[2])) if name == 'ROFEX' else (lambda r: r[0])
+        key = lambda r: r[0]
         merged = {key(r): r for r in old}
         stamp = now.replace(tzinfo=None)
         for r in new:
@@ -158,13 +179,22 @@ def apply_results(book, results, errors, now):
         if name in wb.sheetnames: del wb[name]
         ws = wb.create_sheet(name, position)
         format_sheet(ws, name, rows, now)
+        if name == 'Errepar' and 'Histórico Errepar' in wb.sheetnames:
+            del wb['Histórico Errepar']
+    # Eliminación pedida expresamente; el respaldo conserva el libro previo completo.
+    if 'ROFEX' in wb.sheetnames: del wb['ROFEX']
+    for name, error in errors.items():
+        if name not in wb.sheetnames:
+            ws = wb.create_sheet(name)
+            format_sheet(ws,name,[],now)
+            ws['A3'] = 'SIN CONSULTA CORRECTA: ' + error.splitlines()[0][:250]
     dates_report = coverage(wb,now)
     # Preferencia del usuario: Fuente tiene exactamente cinco renglones de metadatos.
     if 'Fuente' in wb.sheetnames: del wb['Fuente']
     src = wb.create_sheet('Fuente')
     src.append(['Fuentes · ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' Argentina', 'Estado de la última consulta'])
-    for group, names in [('BNA · El Cronista',['Cotizaciones']), ('Índices · Yahoo / BYMA',list(INDICES)),
-                         ('ROFEX · A3',['ROFEX']), ('SOFR · New York Fed',['SOFR'])]:
+    for group, names in [('BNA · Cronista / Errepar',['Cotizaciones','Errepar']), ('Índices · Yahoo / BYMA',list(INDICES)),
+                         ('MAE · FOREX y cauciones',['FOREX','Cauciones']), ('SOFR / Riesgo país',['SOFR','Riesgo país'])]:
         parts = []
         for name in names:
             item = dates_report[name]; last = item['ultima_fecha_dato'] or 'sin dato'

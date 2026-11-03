@@ -10,6 +10,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from actualizar_oficial import BOOK
 
 MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+REMOTE_NAME = 'Datos Financieros.xlsx'
 
 def find_book(service, folder_id):
     if not folder_id or not all(c.isalnum() or c in '_-' for c in folder_id):
@@ -18,7 +19,7 @@ def find_book(service, folder_id):
     if folder['mimeType'] != 'application/vnd.google-apps.folder' or not folder.get('capabilities', {}).get('canAddChildren'):
         raise ValueError('La carpeta no existe o no permite escribir')
     result = service.files().list(
-        q=f"'{folder_id}' in parents and trashed = false and name = '{BOOK.name}'",
+        q=f"'{folder_id}' in parents and trashed = false and (name = '{REMOTE_NAME}' or name = '{BOOK.name}')",
         fields='files(id,mimeType,version),nextPageToken', pageSize=100).execute()
     files = result.get('files', [])
     if len(files) > 1 or result.get('nextPageToken'):
@@ -49,9 +50,9 @@ def main():
         current = service.files().get(fileId=existing['id'], fields='version').execute()
         if current['version'] != existing['version']:
             raise RuntimeError('El archivo cambió en Drive durante la consulta; se cancela para preservar los cambios')
-        service.files().update(fileId=existing['id'], media_body=media).execute()
+        service.files().update(fileId=existing['id'], body={'name':REMOTE_NAME}, media_body=media).execute()
     else:
-        service.files().create(body={'name': BOOK.name, 'parents': [folder_id]}, media_body=media).execute()
+        service.files().create(body={'name': REMOTE_NAME, 'parents': [folder_id]}, media_body=media).execute()
     print('Excel actualizado en Google Drive.')
     from actualizar_economicos import check_result
     check_result()

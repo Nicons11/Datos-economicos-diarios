@@ -33,6 +33,8 @@ def exchange(url, key, action, **values):
 def main():
     url, key = os.environ['APPS_SCRIPT_URL'].strip(), os.environ['APPS_SCRIPT_KEY'].strip()
     previous = exchange(url, key, 'read')
+    if previous.get('fileName') not in ('Datos Financieros.xlsx', 'Tipo_de_Cambio_BNA.xlsx'):
+        raise RuntimeError('Actualizar Código.gs y su implementación web en Apps Script antes de activar Datos Financieros; se conserva Drive sin cambios')
     if previous.get('content') is not None:
         BOOK.write_bytes(base64.b64decode(previous['content'], validate=True))
     subprocess.run([sys.executable, str(BOOK.parent / 'actualizar_economicos.py')], check=True)
@@ -40,6 +42,8 @@ def main():
                       content=base64.b64encode(BOOK.read_bytes()).decode('ascii'))
     if not result.get('fileId'):
         raise RuntimeError('Google no confirmó el ID del archivo guardado')
+    if result.get('fileName') != 'Datos Financieros.xlsx':
+        raise RuntimeError('Drive no confirmó el nuevo nombre Datos Financieros.xlsx')
     verified = exchange(url, key, 'read')
     saved = base64.b64decode(verified.get('content') or '', validate=True)
     if hashlib.sha256(saved).digest() != hashlib.sha256(BOOK.read_bytes()).digest():
